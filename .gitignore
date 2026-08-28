@@ -1,0 +1,30 @@
+# Godot 4
+.godot/
+/android/
+export_presets.cfg
+*.translation
+
+# 匯出產物
+/build/
+/export/
+*.pck
+*.exe
+*.x86_64
+*.app
+*.dmg
+*.zip
+
+# 美術暫存
+*.blend1
+*.blend2
+*.psd~
+
+# 作業系統
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 編輯器
+.vscode/
+.idea/
+*.swp
