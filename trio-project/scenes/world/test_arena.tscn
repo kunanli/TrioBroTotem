@@ -1,0 +1,87 @@
+[gd_scene load_steps=10 format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+
+[sub_resource type="Sky" id="Sky_sky"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_env"]
+background_mode = 2
+sky = SubResource("Sky_sky")
+ambient_light_source = 3
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
+albedo_color = Color(0.36, 0.42, 0.33, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_block"]
+size = Vector3(2, 2, 2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_block"]
+size = Vector3(2, 2, 2)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_block"]
+albedo_color = Color(0.55, 0.44, 0.31, 1)
+
+[node name="TestArena" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, 0, 0.5, 0.383, 0.6428, -0.6633, -0.3214, 0.766, 0.5567, 0, 12, 0)
+shadow_enabled = true
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_floor")
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_floor")
+material_override = SubResource("StandardMaterial3D_floor")
+
+[node name="BlockA" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1, -6)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="BlockA"]
+shape = SubResource("BoxShape3D_block")
+
+[node name="Mesh" type="MeshInstance3D" parent="BlockA"]
+mesh = SubResource("BoxMesh_block")
+material_override = SubResource("StandardMaterial3D_block")
+
+[node name="BlockB" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 1, -4)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="BlockB"]
+shape = SubResource("BoxShape3D_block")
+
+[node name="Mesh" type="MeshInstance3D" parent="BlockB"]
+mesh = SubResource("BoxMesh_block")
+material_override = SubResource("StandardMaterial3D_block")
+
+[node name="Ledge" type="StaticBody3D" parent="."]
+transform = Transform3D(3, 0, 0, 0, 1, 0, 0, 0, 1.5, 0, 1, -10)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="Ledge"]
+shape = SubResource("BoxShape3D_block")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ledge"]
+mesh = SubResource("BoxMesh_block")
+material_override = SubResource("StandardMaterial3D_block")

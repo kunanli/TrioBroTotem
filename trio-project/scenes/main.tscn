@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/world/test_arena.tscn" id="2_arena"]
+[ext_resource type="Script" path="res://scripts/ui/lobby_ui.gd" id="3_lobby"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="TestArena" parent="World" instance=ExtResource("2_arena")]
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Players")
+
+[node name="LobbyUI" type="CanvasLayer" parent="."]
+script = ExtResource("3_lobby")
