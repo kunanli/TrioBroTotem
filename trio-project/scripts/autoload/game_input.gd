@@ -125,6 +125,10 @@ func is_grab_pressed(device_id: int) -> bool:
 	return is_just_pressed(device_id, &"grab")
 
 
+func is_attack_pressed(device_id: int) -> bool:
+	return is_just_pressed(device_id, &"attack")
+
+
 ## 投擲：手把是 RT，鍵鼠是攻擊鍵（抓著東西時的攻擊就是投擲）。
 ## 這個不對稱來自 docs/06——手把按鍵已經排滿，鍵鼠還有餘裕。
 ## 按住蓄力、放開擲出，所以這裡回傳的是「是否按住」而不是邊緣。

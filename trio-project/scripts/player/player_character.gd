@@ -79,6 +79,11 @@ var display_name: String = ""
 ## 重量即規則（docs/01）。抓取、疊高順序、擊退距離都讀這個值。
 var weight: float = WeightLadder.PIG
 
+## 這個 slot 演哪隻動物，以及牠的身高。碰撞體、鏡頭、攜帶錨點都依身高換算，
+## 因為三隻的高度差很多（1.4 到 1.7 公尺）。
+var character_id: StringName = &""
+var character_height: float = 1.8
+
 ## 正被誰扛著，-1 表示沒有。由 host 透過 CarrySystem 廣播寫入。
 var carried_by_slot: int = -1
 
@@ -99,6 +104,9 @@ var _camera_anchor: Vector3 = Vector3.ZERO
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
+
+@onready var _character: CharacterVisual = $Visual/Character
+@onready var _collision: CollisionShape3D = $Collision
 @onready var _visual: Node3D = $Visual
 @onready var _label: Label3D = $NameLabel
 @onready var _camera: Camera3D = $Camera3D
@@ -107,7 +115,7 @@ var _camera_anchor: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	add_to_group("player_characters")
-	weight = WeightLadder.for_slot(slot_id)
+	_setup_character()
 	_carryable.weight = weight
 
 	_setup_synchronizer()
@@ -156,9 +164,37 @@ func _setup_synchronizer() -> void:
 	add_child(sync)
 
 
+## 依角色身高調整碰撞體、鏡頭與攜帶錨點，再載入模型。
+##
+## 模型的原點在腳底，而角色本體的原點在膠囊中心，所以模型要往下移半個身高。
+## 之所以不把本體原點改到腳底：鏡頭、攜帶錨點、抓取偵測區、出生點高度
+## 全部是繞著中心調出來的，改原點等於全部重調。
+func _setup_character() -> void:
+	character_id = CharacterRoster.id_for_slot(slot_id)
+	var entry := CharacterRoster.entry(character_id)
+	weight = entry.get("weight", WeightLadder.for_slot(slot_id))
+	character_height = entry.get("height", 1.8)
+
+	var capsule := _collision.shape.duplicate() as CapsuleShape3D
+	if capsule != null:
+		capsule.height = character_height
+		capsule.radius = minf(character_height * 0.22, character_height * 0.5 - 0.01)
+		_collision.shape = capsule  # 一定要 duplicate，否則三隻共用同一份形狀
+
+	carry_anchor.position.y = character_height * 0.95
+	_label.position.y = character_height * 0.62
+
+	if _character.load_character(character_id):
+		_character.position.y = -character_height * 0.5
+		for mesh in [$Visual/Body, $Visual/Nose]:
+			mesh.visible = false  # 模型載入成功才收起膠囊，失敗時仍看得到東西
+	else:
+		push_warning("[Player] %s 的模型載入失敗，保留膠囊" % character_id)
+
+
 ## 鏡頭要對準的點：角色身上稍高的位置，不是腳底。
 func _focus_target() -> Vector3:
-	return global_position + Vector3.UP * CAMERA_TARGET_HEIGHT
+	return global_position + Vector3.UP * (character_height * CAMERA_TARGET_RATIO)
 
 
 ## 鏡頭相對於注視點的位移。
@@ -264,6 +300,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		_process_remote(delta)
 	_visual.rotation.y = _yaw
+	_character.drive(Vector3(velocity.x, 0.0, velocity.z).length())
 
 
 func _process_authority(delta: float) -> void:
@@ -307,6 +344,10 @@ func _process_authority(delta: float) -> void:
 
 ## 只送請求，不自己決定結果。目標查詢與重量驗證都在 host（TD-02）。
 func _process_carry_input(delta: float) -> void:
+	# 攻擊：手上沒東西時是攻擊動作，抓著東西時攻擊鍵是投擲（docs/06）。
+	if not is_carrying() and GameInput.is_attack_pressed(device_id):
+		_character.play_action(&"attack")
+
 	if GameInput.is_grab_pressed(device_id):
 		if is_carrying():
 			CarrySystem.request_drop.rpc_id(1, slot_id)

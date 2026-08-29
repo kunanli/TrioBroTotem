@@ -181,6 +181,34 @@ def run(root):
                 problems.append(f"{script.relative_to(root)}: connect 到不存在的 {callback}()")
     notes.append(f"訊號連接：檢查了 {connects} 處")
 
+    # --- 5. 角色身高：管線設定檔與遊戲名冊必須一致 ---
+    heights_file = root / "assets" / "source" / "characters.json"
+    roster_file = project / "scripts" / "core" / "character_roster.gd"
+    if heights_file.exists() and roster_file.exists():
+        import json
+
+        config = {
+            k: float(v)
+            for k, v in json.loads(heights_file.read_text(encoding="utf-8")).items()
+            if not k.startswith("_")
+        }
+        roster = {
+            m[0]: float(m[1])
+            for m in re.findall(
+                r'&"(\w+)":\s*\{[^}]*?"height":\s*([\d.]+)',
+                roster_file.read_text(encoding="utf-8"),
+                re.S,
+            )
+        }
+        for name in sorted(set(config) | set(roster)):
+            if config.get(name) != roster.get(name):
+                problems.append(
+                    f"角色 {name} 的身高不一致："
+                    f"characters.json {config.get(name)} vs character_roster.gd {roster.get(name)}"
+                    "（碰撞體會對不上模型）"
+                )
+        notes.append(f"角色身高：比對 {len(set(config) | set(roster))} 隻")
+
     # --- 5. 群組 ---
     added, used = set(), set()
     for text in script_text.values():
