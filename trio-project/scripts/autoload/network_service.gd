@@ -83,6 +83,15 @@ func is_host() -> bool:
 	return mode == Mode.HOST
 
 
+## 這一端該不該模擬場景物理。host 與單機為 true，客戶端為 false。
+##
+## 與 is_host() 分開是因為時機問題：場景物件在主場景載入時就 _ready 了，
+## 那時還沒開房，is_host() 還是 false。物件若在 _ready 當下就決定要不要凍結，
+## 開房後 host 的箱子會全部卡住不動。
+func simulates_world() -> bool:
+	return mode != Mode.CLIENT
+
+
 func local_peer_id() -> int:
 	if multiplayer.multiplayer_peer == null:
 		return 1

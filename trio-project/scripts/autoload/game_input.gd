@@ -22,8 +22,19 @@ const KEY_BINDINGS := {
 	"interact": [KEY_E],
 }
 
-## 手把沒有現成的 just_pressed，自己做邊緣偵測，否則按住會連跳。
-var _joy_jump_held := {}
+## 手把按鍵對應，依 docs/06-controls-ui.md 的配置表（Xbox 標示）。
+const JOY_BINDINGS := {
+	"jump": JOY_BUTTON_A,
+	"attack": JOY_BUTTON_X,
+	"grab": JOY_BUTTON_B,
+	"interact": JOY_BUTTON_LEFT_SHOULDER,
+}
+
+## 搖桿的死區。低於這個值視為沒推。
+const STICK_DEADZONE := 0.2
+
+## 手把沒有現成的 just_pressed，自己做邊緣偵測，否則按住會連續觸發。
+var _joy_held: Dictionary = {}
 
 
 func _ready() -> void:
@@ -46,13 +57,34 @@ func get_move_vector(device_id: int) -> Vector2:
 		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
 		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
 	)
-	return raw if raw.length() > 0.2 else Vector2.ZERO
+	return raw if raw.length() > STICK_DEADZONE else Vector2.ZERO
+
+
+func is_pressed(device_id: int, action: StringName) -> bool:
+	if device_id < 0:
+		return Input.is_action_pressed(action)
+	return Input.is_joy_button_pressed(device_id, JOY_BINDINGS[action])
+
+
+func is_just_pressed(device_id: int, action: StringName) -> bool:
+	if device_id < 0:
+		return Input.is_action_just_pressed(action)
+	var key := "%d:%s" % [device_id, action]
+	var held := Input.is_joy_button_pressed(device_id, JOY_BINDINGS[action])
+	var was_held: bool = _joy_held.get(key, false)
+	_joy_held[key] = held
+	return held and not was_held
 
 
 func is_jump_pressed(device_id: int) -> bool:
-	if device_id < 0:
-		return Input.is_action_just_pressed("jump")
-	var held := Input.is_joy_button_pressed(device_id, JOY_BUTTON_A)
-	var was_held: bool = _joy_jump_held.get(device_id, false)
-	_joy_jump_held[device_id] = held
-	return held and not was_held
+	return is_just_pressed(device_id, &"jump")
+
+
+func is_grab_pressed(device_id: int) -> bool:
+	return is_just_pressed(device_id, &"grab")
+
+
+## 投擲不佔獨立按鍵：抓著東西時的攻擊鍵就是投擲（docs/06-controls-ui.md）。
+## 按住蓄力、放開擲出，所以這裡回傳的是「是否按住」而不是邊緣。
+func is_throw_held(device_id: int) -> bool:
+	return is_pressed(device_id, &"attack")

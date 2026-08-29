@@ -7,7 +7,8 @@ extends CharacterBody3D
 ## 權威端跑輸入與物理，把結果寫進 net_* 變數；
 ## MultiplayerSynchronizer 把 net_* 送給其他人，其他人只做插值。
 ##
-## 之後要加的抓取、投擲、疊高全部是 host 權威，不會走這條路徑。
+## 抓取與投擲**不走**這條路徑——那是 host 權威，見 CarrySystem。
+## 這裡只負責「送出請求」與「被抓時不要自己亂動」。
 
 const SPEED := 5.5
 const ACCELERATION := 14.0
@@ -23,6 +24,15 @@ const REMOTE_LERP := 18.0
 ## 差距超過這個距離就直接瞬移。延遲尖峰後若只靠 lerp 會滑行很久。
 const TELEPORT_DISTANCE := 3.0
 
+## 投擲蓄力到滿所需的秒數。
+const THROW_CHARGE_TIME := 0.8
+
+## 掙扎到這個量就掙脫。被抓者狂推搖桿約兩秒。
+const STRUGGLE_TO_BREAK := 2.4
+
+## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
+const CARRY_SPEED_PENALTY := 0.7
+
 const SLOT_COLORS := [
 	Color(0.90, 0.42, 0.32),  # 0 泥土色
 	Color(0.36, 0.76, 0.48),  # 1 水草色
@@ -35,6 +45,12 @@ var device_id: int = -1
 var is_ai: bool = false
 var display_name: String = ""
 
+## 重量即規則（docs/01）。抓取、疊高順序、擊退距離都讀這個值。
+var weight: float = WeightLadder.PIG
+
+## 正被誰扛著，-1 表示沒有。由 host 透過 CarrySystem 廣播寫入。
+var carried_by_slot: int = -1
+
 # --- 被複製的狀態（權威端寫，其他人讀）---
 var net_position: Vector3 = Vector3.ZERO
 var net_velocity: Vector3 = Vector3.ZERO
@@ -42,13 +58,22 @@ var net_yaw: float = 0.0
 
 var _yaw: float = 0.0
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
+var _throw_charge: float = 0.0
+var _struggle: float = 0.0
 
+@onready var carry_anchor: Node3D = $Visual/CarryAnchor
+@onready var grab_probe: Area3D = $Visual/GrabProbe
 @onready var _visual: Node3D = $Visual
 @onready var _label: Label3D = $NameLabel
 @onready var _camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
+@onready var _carryable: Carryable = $Carryable
 
 
 func _ready() -> void:
+	add_to_group("player_characters")
+	weight = WeightLadder.for_slot(slot_id)
+	_carryable.weight = weight
+
 	_setup_synchronizer()
 	# 權威要在 synchronizer 建好之後才設，才會遞迴傳給它。
 	set_multiplayer_authority(owner_peer_id)
@@ -90,8 +115,36 @@ func _setup_synchronizer() -> void:
 	add_child(sync)
 
 
+## 面向的基底。投擲方向讀這個，不是讀 CharacterBody3D 的 transform——
+## 本體不旋轉（旋轉會把鏡頭一起帶著轉），朝向只存在 Visual 上。
+func facing_basis() -> Basis:
+	return Basis(Vector3.UP, _yaw)
+
+
+func facing_yaw() -> float:
+	return _yaw
+
+
+## 由 Carryable 呼叫，不要從別的地方寫。
+func set_carried_by(holder_slot: int) -> void:
+	carried_by_slot = holder_slot
+	_struggle = 0.0
+	if holder_slot >= 0:
+		velocity = Vector3.ZERO
+
+
+func apply_throw(release_velocity: Vector3) -> void:
+	velocity = release_velocity
+
+
+func is_carrying() -> bool:
+	return CarrySystem.held_carryable(slot_id) != null
+
+
 func _physics_process(delta: float) -> void:
-	if is_multiplayer_authority():
+	if carried_by_slot >= 0:
+		_process_carried(delta)
+	elif is_multiplayer_authority():
 		_process_authority(delta)
 	else:
 		_process_remote(delta)
@@ -115,7 +168,8 @@ func _process_authority(delta: float) -> void:
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 
-	var target := wish * SPEED
+	var speed := SPEED * (CARRY_SPEED_PENALTY if is_carrying() else 1.0)
+	var target := wish * speed
 	velocity.x = move_toward(velocity.x, target.x, ACCELERATION * delta)
 	velocity.z = move_toward(velocity.z, target.z, ACCELERATION * delta)
 	move_and_slide()
@@ -123,16 +177,57 @@ func _process_authority(delta: float) -> void:
 	if wish.length_squared() > 0.01:
 		_yaw = lerp_angle(_yaw, atan2(-wish.x, -wish.z), TURN_SPEED * delta)
 
+	_process_carry_input(delta)
+
 	net_position = global_position
 	net_velocity = velocity
 	net_yaw = _yaw
+
+
+## 只送請求，不自己決定結果。目標查詢與重量驗證都在 host（TD-02）。
+func _process_carry_input(delta: float) -> void:
+	if GameInput.is_grab_pressed(device_id):
+		if is_carrying():
+			CarrySystem.request_drop.rpc_id(1, slot_id)
+		else:
+			CarrySystem.request_grab.rpc_id(1, slot_id)
+
+	if not is_carrying():
+		_throw_charge = 0.0
+		return
+
+	if GameInput.is_throw_held(device_id):
+		_throw_charge = minf(_throw_charge + delta / THROW_CHARGE_TIME, 1.0)
+	elif _throw_charge > 0.0:
+		CarrySystem.request_throw.rpc_id(1, slot_id, _throw_charge)
+		_throw_charge = 0.0
+
+
+## 被扛著時位置由 Carryable 決定，這裡只做兩件事：面向持有者的方向、累積掙扎。
+func _process_carried(delta: float) -> void:
+	var holder := CarrySystem.find_player(carried_by_slot)
+	if holder != null:
+		_yaw = holder.facing_yaw()
+	velocity = Vector3.ZERO
+	net_position = global_position
+	net_yaw = _yaw
+
+	if not is_multiplayer_authority():
+		return
+	# 掙扎在被抓者自己這端累積，滿了才送一次請求——
+	# 每幀送搖桿量會是 60 packets/s，一個人被抓就吃掉整條頻寬。
+	var struggle_input := GameInput.get_move_vector(device_id).length()
+	_struggle += struggle_input * delta
+	if _struggle >= STRUGGLE_TO_BREAK:
+		_struggle = 0.0
+		CarrySystem.request_struggle_break.rpc_id(1, carried_by_slot)
 
 
 func _process_remote(delta: float) -> void:
 	if global_position.distance_to(net_position) > TELEPORT_DISTANCE:
 		global_position = net_position
 	else:
-		var weight := clampf(REMOTE_LERP * delta, 0.0, 1.0)
-		global_position = global_position.lerp(net_position, weight)
+		var weight_factor := clampf(REMOTE_LERP * delta, 0.0, 1.0)
+		global_position = global_position.lerp(net_position, weight_factor)
 	velocity = net_velocity
 	_yaw = lerp_angle(_yaw, net_yaw, clampf(REMOTE_LERP * delta, 0.0, 1.0))

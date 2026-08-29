@@ -8,8 +8,8 @@ M0 技術驗證原型。全程膠囊體：**零美術、零動畫、零 shader**
 
 | M0 步驟 | 狀態 |
 |---|---|
-| 0. `NetworkService` + `PlayerSlot` + 三人連線基本移動 | ✅ 骨架完成 |
-| 1. 抓取與投擲同步 | ⬜ |
+| 0. `NetworkService` + `PlayerSlot` + 三人連線基本移動 | ✅ 已寫，未在引擎驗證 |
+| 1. 抓取與投擲同步 | ✅ 已寫，未在引擎驗證 |
 | 2. **疊高同步**（最高風險） | ⬜ |
 | 3. Ragdoll 與倒地救援 | ⬜ |
 | 4. 在 80–150 ms 延遲下重跑驗收（TD-10） | ⬜ |
@@ -19,15 +19,21 @@ M0 技術驗證原型。全程膠囊體：**零美術、零動畫、零 shader**
 ```
 scenes/
   main.tscn              進入點：World + Players + PlayerSpawner + LobbyUI
-  player/player.tscn     膠囊角色（含跟隨鏡頭）
-  world/test_arena.tscn  測試場地
+  player/player.tscn     膠囊角色（含跟隨鏡頭、抓取偵測、攜帶錨點）
+  world/test_arena.tscn  測試場地（含三個箱子與一顆石頭）
+  world/crate.tscn       可搬物件
 scripts/
   autoload/
     network_service.gd   TD-03：唯一碰 MultiplayerPeer 的地方
     player_registry.gd   TD-02/04：隊伍名冊，host 權威
     game_input.gd        TD-04：輸入以 device_id 分流
-  core/player_slot.gd    TD-04：玩家身分（一個 peer 可以有多個）
+    carry_system.gd      TD-02：抓取、投擲、掙扎的權威判定
+  core/
+    player_slot.gd       TD-04：玩家身分（一個 peer 可以有多個）
+    weight_ladder.gd     重量階梯，全遊戲唯一一張表
+    carryable.gd         可被抓起的元件（玩家與場景物件共用）
   player/player_character.gd  TD-02：自己的角色自己算，其他人插值
+  world/prop.gd          host 權威的場景物理物件
   main.gd                名冊 → 場上角色
   ui/lobby_ui.gd         開發用連線面板（不是 HUD）
 ```
@@ -46,7 +52,26 @@ godot --path . -- --join=127.0.0.1
 
 沒帶參數就用畫面左上角的面板手動開房／加入。
 
-操作：`WASD` 移動、`空白鍵` 跳。膠囊前面那塊小方塊是朝向指示。
+**即使一個人測也要先按「開房」**——抓取判定走 host RPC，沒有連線時沒有 host，
+也不會生成任何角色。
+
+### 操作
+
+| 鍵 | 手把 | 動作 |
+|---|---|---|
+| WASD | 左搖桿 | 移動；被抓時變成掙扎 |
+| 空白鍵 | A | 跳 |
+| F | B | 抓取／放下 |
+| J（按住蓄力，放開擲出） | X | 投擲 |
+
+膠囊前面那塊小方塊是朝向指示。
+
+### 步驟 1 要驗的四件事
+
+1. **重量規則**：豬（slot 0）抓得動蛙與貓，貓抓不動豬也抓不動石頭。同重量抓不動是刻意的
+2. **被抓的人**：位置跟著抓的人走，狂推搖桿約兩秒可以掙脫
+3. **投擲**：蓄力越久飛越遠；目標越重飛越近
+4. **三台一致**：三邊看到的「誰拿著什麼」必須完全一致，不能有人手上是空的
 
 ## 延遲測試（TD-10，M0 驗收的必要條件）
 

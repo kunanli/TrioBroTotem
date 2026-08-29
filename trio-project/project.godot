@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 NetworkService="*res://scripts/autoload/network_service.gd"
 PlayerRegistry="*res://scripts/autoload/player_registry.gd"
 GameInput="*res://scripts/autoload/game_input.gd"
+CarrySystem="*res://scripts/autoload/carry_system.gd"
 
 [display]
 
@@ -32,6 +33,7 @@ window/stretch/aspect="expand"
 
 3d_physics/layer_1="World"
 3d_physics/layer_2="Player"
+3d_physics/layer_3="Prop"
 
 [physics]
 

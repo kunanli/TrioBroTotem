@@ -1,6 +1,7 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player_character.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/core/carryable.gd" id="2_carryable"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -13,13 +14,19 @@ height = 1.8
 [sub_resource type="BoxMesh" id="BoxMesh_nose"]
 size = Vector3(0.18, 0.18, 0.3)
 
+[sub_resource type="SphereShape3D" id="SphereShape3D_grab"]
+radius = 0.9
+
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
-collision_mask = 1
+collision_mask = 5
 script = ExtResource("1_player")
 
 [node name="Collision" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape3D_body")
+
+[node name="Carryable" type="Node3D" parent="."]
+script = ExtResource("2_carryable")
 
 [node name="Visual" type="Node3D" parent="."]
 
@@ -29,6 +36,17 @@ mesh = SubResource("CapsuleMesh_body")
 [node name="Nose" type="MeshInstance3D" parent="Visual"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, -0.45)
 mesh = SubResource("BoxMesh_nose")
+
+[node name="CarryAnchor" type="Node3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -0.5)
+
+[node name="GrabProbe" type="Area3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, -0.8)
+collision_layer = 0
+collision_mask = 6
+
+[node name="Shape" type="CollisionShape3D" parent="Visual/GrabProbe"]
+shape = SubResource("SphereShape3D_grab")
 
 [node name="NameLabel" type="Label3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, 0)
