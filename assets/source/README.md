@@ -67,26 +67,17 @@ cd TrioBroTotem
 git pull
 pip install git-filter-repo
 
-git filter-repo --force --invert-paths ^
-    --path-glob "assets/*.fbx" ^
-    --path-glob "assets/*.png"
-
-git remote add origin https://github.com/kunanli/TrioBroTotem
+python tools/purge_history.py --dry-run
+python tools/purge_history.py --backup-to ../TrioBroTotem_assets_backup --yes
 git push --force origin main
 ```
 
-（`^` 是 Windows CMD 的換行符；PowerShell 用 `` ` ``，Linux/macOS 用 `\`。
-不想換行就全部寫成一行。`filter-repo` 會刻意移除 remote 當作安全機制，
-所以要重新加回去。）
+腳本會先擋掉不安全的情況（working tree 不乾淨、還有沒推上去的 commit），
+列出會清掉哪些檔案，備份到 repo 外面，改寫歷史，重新加回 remote，
+然後印出驗證數字。**最後的強制推送刻意留給你手動執行**，確認數字都對再按。
 
-**驗證有沒有真的清掉**：
-
-```
-git rev-list --objects --all | findstr ".fbx"
-git count-objects -vH
-```
-
-第一行應該沒有輸出。第二行的 `size-pack` 應該從約 390 MB 掉到 1 MB 以下。
+`--backup-to` 很重要：`filter-repo` 結束時會做 `reset --hard`，
+所以 working tree 裡的模型檔會一起被刪掉。要留著就先備份到 repo 外面。
 
 > `--path-glob "assets/*.png"` 的 `*` 會跨越 `/`，所以兩批模型不管放在
 > `assets/source/` 還是 `assets/<角色>/` 都會被清掉。`assets/reference/`
