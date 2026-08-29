@@ -230,20 +230,18 @@ def fmt(value):
 
 
 def measure(meshes):
-    """角色的世界空間尺寸。回傳 (最長邊, 三軸)。
+    """角色的世界空間尺寸 (寬, 深, 高)。
 
-    直立兩足角色的最長邊就是身高。用最長邊而不是指定某一軸，
-    是因為不同來源的上方向不一樣（FBX 是 Y-up、Blender 是 Z-up、
-    有的匯出器還會多轉一次），指定軸很容易量錯。
+    只有在 rotation 套用之後呼叫才正確——Blender 的世界是 Z-up，
+    但 FBX 進來時物件常帶著一層旋轉，沒套用之前 Z 不一定是「上」。
     """
     corners = [obj.matrix_world @ Vector(c) for obj in meshes for c in obj.bound_box]
     if not corners:
-        return 0.0, (0.0, 0.0, 0.0)
-    size = tuple(
+        return (0.0, 0.0, 0.0)
+    return tuple(
         max(c[i] for c in corners) - min(c[i] for c in corners)
         for i in range(3)
     )
-    return max(size), size
 
 
 def normalise_transforms(armature, meshes, target_height):
@@ -255,37 +253,40 @@ def normalise_transforms(armature, meshes, target_height):
 
     不動 location：位移套用會把角色的原點搬走。
     """
-    before, dims = measure(meshes)
-    print(f"角色尺寸：{fmt(dims[0])} x {fmt(dims[1])} x {fmt(dims[2])} 公尺"
-          f"（最長邊 {fmt(before)}）")
-
-    if target_height > 0.0:
-        if before <= 0.0:
-            print("! 量不到尺寸，跳過高度正規化")
-        else:
-            factor = target_height / before
-            armature.scale = armature.scale * factor
-            print(f"高度正規化：{fmt(before)} → {fmt(target_height)}（係數 {fmt(factor)}）")
-
-    bpy.ops.object.select_all(action="DESELECT")
     targets = [armature] + meshes
-    for obj in targets:
-        obj.select_set(True)
-    bpy.context.view_layer.objects.active = armature
-    result = bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-    print(f"套用 rotation 與 scale：{len(targets)} 個物件，結果 {'/'.join(result)}")
 
+    def select_all():
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in targets:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = armature
+
+    # 先只套用 rotation。量測必須在這之後，Z 才確定是「上」。
+    select_all()
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+
+    width, depth, height = measure(meshes)
+    print(f"角色尺寸：寬 {fmt(width)} × 深 {fmt(depth)} × 高 {fmt(height)} 公尺")
+
+    if target_height > 0.0 and height > 0.0:
+        factor = target_height / height
+        armature.scale = armature.scale * factor
+        print(f"高度正規化：{fmt(height)} → {fmt(target_height)}（係數 {fmt(factor)}）")
+    elif target_height > 0.0:
+        print("! 量不到高度，跳過高度正規化")
+
+    select_all()
+    result = bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     leftover = [o for o in targets if any(abs(v - 1.0) > 1e-4 for v in o.scale)]
     for obj in leftover:
-        print(f"! {obj.name} 的 scale 仍是 {tuple(round(v, 4) for v in obj.scale)}，未能套用")
+        print(f"! {obj.name} 的 scale 仍是 {tuple(round(v, 4) for v in obj.scale)}，未能套用（{'/'.join(result)}）")
 
-    after, dims = measure(meshes)
-    print(f"套用後尺寸：{fmt(dims[0])} x {fmt(dims[1])} x {fmt(dims[2])} 公尺"
-          f"（最長邊 {fmt(after)}）")
-    if after < 0.1 or after > 100.0:
-        print(f"! 最長邊 {fmt(after)} 公尺明顯不合理。Meshy 的匯出單位不固定，"
-              f"用 --target-height 指定身高即可，例如 --target-height 1.8")
-    return after
+    width, depth, height = measure(meshes)
+    print(f"最終尺寸：寬 {fmt(width)} × 深 {fmt(depth)} × 高 {fmt(height)} 公尺")
+    if height < 0.1 or height > 100.0:
+        print(f"! 高度 {fmt(height)} 公尺明顯不合理。Meshy 的匯出單位不固定，"
+              f"用 --target-height 指定身高即可。")
+    return height
 
 
 def triangle_count(meshes):

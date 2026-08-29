@@ -346,12 +346,14 @@ def inspect_one(model_path, map_path):
         warnings.append("沒有內嵌動畫。骨架若對得上 profile，可以用外部人形動畫庫 retarget（TD-07 選這套命名就是為了這個）。")
 
     if joints:
-        height, size = skeleton_extent(gltf, joints, parents)
-        print(f"\n## 尺寸\n骨架 {size[0]:.4g} x {size[1]:.4g} x {size[2]:.4g} 公尺"
-              f"（最長邊 {height:.4g}）")
+        _, size = skeleton_extent(gltf, joints, parents)
+        # glTF 是 Y-up：X 寬、Y 高、Z 深。
+        height = size[1]
+        print(f"\n## 尺寸\n骨架 寬 {size[0]:.4g} × 高 {height:.4g} × 深 {size[2]:.4g} 公尺")
+        print("（骨架的範圍，會略小於含網格的外框）")
         if height < 0.1 or height > 100.0:
             problems.append(
-                f"骨架最長邊 {height:.4g} 公尺，明顯不合理。Meshy 的匯出單位不固定，"
+                f"骨架高度 {height:.4g} 公尺，明顯不合理。Meshy 的匯出單位不固定，"
                 f"正規化時加 --target-height 指定身高即可。"
             )
 

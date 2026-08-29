@@ -16,6 +16,7 @@ Blender 的安裝路徑很少在 PATH 上，尤其 Windows。與其每次打一�
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -33,6 +34,7 @@ COMMANDS = {
 ## normalize-all 的預設路徑：assets/source/<角色>/ 的模型 → 這裡的 <角色>.glb
 SOURCE_DIR = TOOLS.parent / "assets" / "source"
 OUTPUT_DIR = TOOLS.parent / "trio-project" / "assets" / "characters"
+HEIGHTS = SOURCE_DIR / "characters.json"
 
 # Blender 輸出的雜訊。預設濾掉，--raw 可以保留。
 NOISE = re.compile(r"^\d{2}:\d{2}:\d{2} \| (INFO|WARNING)|^(Info|Warning|FBX|Blender quit)")
@@ -104,6 +106,14 @@ def normalize_all(blender, args):
         print(f"找不到 {SOURCE_DIR}", file=sys.stderr)
         return 1
 
+    heights = {}
+    if HEIGHTS.exists():
+        heights = {
+            k: v for k, v in json.loads(HEIGHTS.read_text(encoding="utf-8")).items()
+            if not k.startswith("_")
+        }
+        print(f"身高設定：{HEIGHTS.name}（{len(heights)} 筆）")
+
     script = TOOLS / COMMANDS["normalize"]
     failed = 0
     handled = 0
@@ -115,7 +125,12 @@ def normalize_all(blender, args):
             print(f"! {folder.name} 底下有 {len(models)} 個模型，只處理 {models[0].name}")
         output = OUTPUT_DIR / f"{folder.name.lower()}.glb"
         print(f"\n{'=' * 60}\n{folder.name} → {output.relative_to(TOOLS.parent)}")
-        extra = ["--input", str(models[0]), "--output", str(output), *args.rest]
+        extra = ["--input", str(models[0]), "--output", str(output)]
+        # 命令列給的 --target-height 優先於設定檔。
+        height = heights.get(output.stem)
+        if height and "--target-height" not in args.rest:
+            extra += ["--target-height", str(height)]
+        extra += args.rest
         if run(blender, script, extra, args.raw) != 0:
             failed += 1
         handled += 1
