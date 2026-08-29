@@ -72,7 +72,7 @@
 
 1. 在 Godot 裡開一次 `trio-project`，跑通三個實例的連線移動（檢查清單見 [trio-project/README.md](trio-project/README.md)）
 2. 接著做 M0 步驟 1–3：抓取投擲同步 → **疊高同步** → Ragdoll 與倒地救援
-3. 確認 Meshy 付費方案的授權條款（在產出任何正式資產前；不擋 M0）
+3. 美術管線驗證：拿一隻模型跑通 Meshy → Blender → Godot（排除風險，不是美術製作）
 
 **M1 結束前必須決定**：第三章的海狸與上市範圍衝突。
 

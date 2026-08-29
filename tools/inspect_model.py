@@ -56,7 +56,7 @@ SIDED_ALIASES = {
     "upleg": "UpperLeg", "upperleg": "UpperLeg", "thigh": "UpperLeg",
     "lowerleg": "LowerLeg", "calf": "LowerLeg", "shin": "LowerLeg", "leg": "LowerLeg",
     "foot": "Foot", "ankle": "Foot",
-    "toebase": "Toes", "toe": "Toes", "ball": "Toes",
+    "toebase": "Toes", "toe": "Toes", "toes": "Toes", "ball": "Toes",
     "eye": "Eye",
 }
 FINGERS = {"thumb": "Thumb", "index": "Index", "middle": "Middle", "ring": "Ring", "pinky": "Little", "little": "Little"}
@@ -82,7 +82,9 @@ def _normalise(name):
 
 
 def guess_standard_name(name):
-    """回傳建議的標準骨骼名，猜不出來回傳 None。"""
+    """回傳建議的標準骨骼名，猜不出來回傳 None。已經是標準名的直接回傳原名。"""
+    if name in REQUIRED_BONES or name in OPTIONAL_BONES:
+        return name
     side, core = _normalise(name)
     if core in ALIASES and side is None:
         return ALIASES[core]
@@ -198,7 +200,7 @@ def main():
             raw = nodes[joint].get("name", f"<node {joint}>")
             guess = guess_standard_name(raw)
             if guess is None:
-                mark = "  ← 猜不出來，要手動指定"
+                mark = "  ← 不在 profile 內"
             elif guess == raw:
                 mark = ""
             else:
