@@ -313,6 +313,13 @@ def scale_rig(armature, meshes, factor):
     if abs(factor - 1.0) < 1e-9:
         return
 
+    # 進 EDIT 前先確保在 OBJECT 模式且作用物件是骨架。少了這一步，
+    # 前一個操作（例如 decimate）留下的作用物件會讓 mode_set 進到
+    # 網格的編輯模式，骨骼就不會被縮放——而且完全沒有錯誤訊息。
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.ops.object.select_all(action="DESELECT")
+    armature.select_set(True)
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode="EDIT")
     for bone in armature.data.edit_bones:
@@ -335,12 +342,40 @@ def scale_rig(armature, meshes, factor):
                 point.handle_right.y *= factor
 
 
-def normalise_transforms(armature, meshes, target_height):
-    """套用 rotation 與 scale，並在指定 target_height 時把角色縮放到該高度。
+def flatten_object_scale(armature, meshes):
+    """把物件層級的 scale 折進骨骼與網格資料，然後把物件 scale 歸一。
 
-    Meshy 匯出的單位不固定（公尺、公分、任意值都遇過），而 FBX 的單位轉換
-    在匯入／套用／匯出三個環節各有一次機會出錯。與其猜來源用什麼單位，
-    不如量出實際尺寸再縮到要的高度——這是唯一不依賴任何慣例的做法。
+    為什麼不用 bpy.ops.object.transform_apply(scale=True)：它對網格與骨架的
+    處理方式不同——只把縮放烤進網格頂點，骨骼資料原封不動。跟 scale_rig
+    這種直接改資料的做法混用之後，後續縮放會變得無法預測：實測出現過
+    「乘 106 卻得到 2605 倍」，修正迴圈因此震盪不收斂。
+
+    全部走同一條路徑（只改資料）之後，縮放就是嚴格線性的。
+    """
+    scale = armature.scale
+    factor = scale.x
+    if max(abs(v - factor) for v in scale) > 1e-6:
+        print(f"! 骨架的 scale 非等比 {tuple(round(v, 5) for v in scale)}，採用 X 分量")
+    if abs(factor - 1.0) > 1e-9:
+        scale_rig(armature, meshes, factor)
+        armature.scale = Vector((1.0, 1.0, 1.0))
+        print(f"物件 scale {fmt(factor)} 已折進資料")
+
+    for obj in meshes:
+        if max(abs(v - 1.0) for v in obj.scale) <= 1e-6:
+            continue
+        local = Vector(obj.scale)
+        for vertex in obj.data.vertices:
+            vertex.co = Vector((
+                vertex.co.x * local.x, vertex.co.y * local.y, vertex.co.z * local.z
+            ))
+        obj.data.update()
+        obj.scale = Vector((1.0, 1.0, 1.0))
+        print(f"{obj.name} 自身的 scale {tuple(round(v, 5) for v in local)} 已折進頂點")
+
+
+def normalise_transforms(armature, meshes):
+    """套用 rotation、把物件 scale 折進資料，並回報角色尺寸。
 
     不動 location：位移套用會把角色的原點搬走。
     """
@@ -355,26 +390,14 @@ def normalise_transforms(armature, meshes, target_height):
     # 先只套用 rotation。量測必須在這之後，Z 才確定是「上」。
     select_all()
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    flatten_object_scale(armature, meshes)
 
     width, depth, height = measure(meshes)
     print(f"角色尺寸：寬 {fmt(width)} × 深 {fmt(depth)} × 高 {fmt(height)} 公尺")
 
-    if target_height > 0.0 and height > 0.0:
-        factor = target_height / height
-        scale_rig(armature, meshes, factor)
-        print(f"高度正規化：{fmt(height)} → {fmt(target_height)}（係數 {fmt(factor)}）")
-    elif target_height > 0.0:
-        print("! 量不到高度，跳過高度正規化")
-
-    # 物件層級殘留的 scale 還是要清掉，但真正的縮放已經由 scale_rig 做完。
-    select_all()
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-
-    width, depth, height = measure(meshes)
-    print(f"最終尺寸：寬 {fmt(width)} × 深 {fmt(depth)} × 高 {fmt(height)} 公尺")
-    if height < 0.1 or height > 100.0:
-        print(f"! 高度 {fmt(height)} 公尺明顯不合理。Meshy 的匯出單位不固定，"
-              f"用 --target-height 指定身高即可。")
+    # 縮放不在這裡做。Blender 的 bound_box 在直接改頂點之後不會更新，
+    # 場景端量到的數字會失真——高度正規化交給 export_verified，
+    # 那裡量的是實際產出的檔案。
     return height
 
 
@@ -448,15 +471,17 @@ def export_verified(armature, meshes, path, image_format, target_height):
     transform_apply 與 glTF 匯出器之間的交互作用會讓尺寸差 100 倍，
     而場景端完全看不出來。唯一可靠的驗收對象是產出的檔案本身。
 
-    縮放是線性的，所以一次修正就會收斂；仍留第二次當保險。
+    scale_rig 是嚴格線性的（實測係數 1/2/10/100 的輸出高度成正比），
+    所以一次修正就會收斂；仍多留幾次當保險。
     """
-    for attempt in range(3):
+    for attempt in range(4):
         export_glb(path, image_format)
         height = gltf_skeleton_height(path)
         if height <= 0.0:
             print("! 產出的檔案量不到骨架高度，跳過驗收")
             return
-        print(f"產出檔骨架高度：{fmt(height)} 公尺")
+        label = "首次匯出" if attempt == 0 else "重匯後"
+        print(f"{label}骨架高度：{fmt(height)} 公尺")
 
         if target_height <= 0.0:
             if height < 0.1 or height > 100.0:
@@ -466,8 +491,8 @@ def export_verified(armature, meshes, path, image_format, target_height):
         error = abs(height - target_height) / target_height
         if error < 0.02:
             return
-        if attempt == 2:
-            print(f"! 修正兩次後仍是 {fmt(height)} 公尺，與目標 {fmt(target_height)} 不符")
+        if attempt == 3:
+            print(f"! 修正 {attempt} 次後仍是 {fmt(height)} 公尺，與目標 {fmt(target_height)} 不符")
             return
         correction = target_height / height
         scale_rig(armature, meshes, correction)
@@ -511,7 +536,7 @@ def main():
     if leaves:
         print(f"葉端骨骼 {len(leaves)} 根（FBX 匯出常見，無害）")
 
-    normalise_transforms(armature, meshes, args.target_height)
+    normalise_transforms(armature, meshes)
 
     final_tris = triangle_count(meshes) if args.no_decimate else decimate_to(meshes, args.tri_max)
     if args.no_decimate and final_tris > args.tri_max:
