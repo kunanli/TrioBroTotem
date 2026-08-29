@@ -98,6 +98,14 @@ func request_collapse(slot_id: int) -> void:
 	collapse_above(slot_id)
 
 
+## 純 host 端的脫離。不要直接呼叫 request_dismount——那是 @rpc 方法，
+## 直接呼叫時 get_remote_sender_id() 拿到的是上一次 RPC 的殘留值。
+func detach(slot_id: int) -> void:
+	if not NetworkService.is_host() or not is_stacked(slot_id):
+		return
+	_apply_unstack.rpc(slot_id, Vector3.UP * COLLAPSE_LIFT)
+
+
 ## host 端也會直接呼叫（例如之後的受擊、ragdoll）。
 func collapse_above(slot_id: int) -> void:
 	if not NetworkService.is_host():

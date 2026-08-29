@@ -22,6 +22,7 @@ PlayerRegistry="*res://scripts/autoload/player_registry.gd"
 GameInput="*res://scripts/autoload/game_input.gd"
 CarrySystem="*res://scripts/autoload/carry_system.gd"
 StackSystem="*res://scripts/autoload/stack_system.gd"
+DownSystem="*res://scripts/autoload/down_system.gd"
 
 [display]
 

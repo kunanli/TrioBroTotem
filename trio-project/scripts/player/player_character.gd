@@ -46,6 +46,18 @@ const STRUGGLE_TO_BREAK := 2.4
 ## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
 const CARRY_SPEED_PENALTY := 0.7
 
+## 落地速度低於這個值不受傷；超出的部分每 1 m/s 換算成多少傷害。
+## 這是 M0 唯一的傷害來源——沒有它就驗不了倒地與救援。
+const SAFE_FALL_SPEED := 11.0
+const FALL_DAMAGE_PER_SPEED := 9.0
+
+## 扶起隊友要按住多久（與 DownSystem.REVIVE_TIME 對齊）。
+const REVIVE_RANGE := 2.2
+
+## 倒地時模型往前趴的角度。這是 ragdoll 的暫代表現——
+## 真正的 PhysicalBone3D 是下一步，先把網路模型驗起來（TD-06）。
+const DOWNED_PITCH := -80.0
+
 ## 疊高偵測的往下探測長度（從腳底往下），以及送出請求的最短間隔。
 const STACK_PROBE_LENGTH := 0.5
 const STACK_REQUEST_INTERVAL := 0.2
@@ -101,6 +113,9 @@ var carried_by_slot: int = -1
 ## 正踩在誰頭上，-1 表示沒有。由 host 透過 StackSystem 廣播寫入。
 var stacked_on: int = -1
 
+## 是否倒地。由 host 透過 DownSystem 廣播寫入。
+var is_downed: bool = false
+
 # --- 被複製的狀態（權威端寫，其他人讀）---
 var net_position: Vector3 = Vector3.ZERO
 var net_velocity: Vector3 = Vector3.ZERO
@@ -111,6 +126,9 @@ var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 
 var _throw_charge: float = 0.0
 var _struggle: float = 0.0
 var _next_stack_request: float = 0.0
+var _revive_progress: float = 0.0
+var _previous_fall_speed: float = 0.0
+var _base_label: String = ""
 
 ## 鏡頭角度與追隨中的注視點。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
 var _camera_yaw: float = 0.0
@@ -139,6 +157,7 @@ func _ready() -> void:
 	set_multiplayer_authority(owner_peer_id)
 
 	_label.text = display_name if not display_name.is_empty() else "Slot %d" % slot_id
+	_base_label = _label.text
 	var material := StandardMaterial3D.new()
 	if slot_id >= 0:
 		material.albedo_color = SLOT_COLORS[slot_id % SLOT_COLORS.size()]
@@ -315,7 +334,9 @@ func is_carrying() -> bool:
 
 
 func _physics_process(delta: float) -> void:
-	if carried_by_slot >= 0:
+	if is_downed and carried_by_slot < 0:
+		_process_downed(delta)
+	elif carried_by_slot >= 0:
 		_process_carried(delta)
 	elif stacked_on >= 0:
 		_process_stacked()
@@ -324,7 +345,8 @@ func _physics_process(delta: float) -> void:
 	else:
 		_process_remote(delta)
 	_visual.rotation.y = _yaw
-	_character.drive(Vector3(velocity.x, 0.0, velocity.z).length())
+	_character.drive(0.0 if is_downed else Vector3(velocity.x, 0.0, velocity.z).length())
+	_update_label()
 
 
 func _process_authority(delta: float) -> void:
@@ -366,10 +388,69 @@ func _process_authority(delta: float) -> void:
 
 	_process_carry_input(delta)
 	_process_stack_probe()
+	_process_revive_input(delta)
+	_process_fall_damage()
+
+	# M0 還沒有敵人。沒有這個鍵就只能靠從高處跳下來驗倒地與救援。
+	if GameInput.is_just_pressed(device_id, &"debug_down"):
+		DownSystem.request_debug_knockdown.rpc_id(1, slot_id)
 
 	net_position = global_position
 	net_velocity = velocity
 	net_yaw = _yaw
+
+
+## 名牌兼狀態顯示。M0 還沒有 HUD（docs/06 那一套要等 M1），
+## 但「誰倒了、扶到哪了」不回饋的話根本測不動。
+func _update_label() -> void:
+	if is_downed:
+		_label.text = "%s（倒地）" % _base_label
+	elif _revive_progress > 0.0:
+		_label.text = "%s 扶起中 %d%%" % [
+			_base_label, int(_revive_progress / DownSystem.REVIVE_TIME * 100.0)
+		]
+	else:
+		_label.text = "%s  %d" % [_base_label, int(DownSystem.health_of(slot_id))]
+
+
+## 落地傷害。M0 沒有敵人，這是唯一的傷害來源，也是驗證倒地與救援的方式。
+##
+## 用「上一幀的下墜速度」而不是當幀的：move_and_slide 撞到地面時會把
+## velocity.y 歸零，當幀讀到的永遠是 0。
+func _process_fall_damage() -> void:
+	var falling := -minf(velocity.y, 0.0)
+	if is_on_floor() and _previous_fall_speed > SAFE_FALL_SPEED:
+		DownSystem.request_fall_damage.rpc_id(1, slot_id, _previous_fall_speed)
+	_previous_fall_speed = falling
+
+
+## 扶起隊友：按住互動鍵靠近倒地的人。累積在自己這端算，
+## 滿了才送一次請求——每幀送在 120 Hz 下會是 120 packets/s。
+func _process_revive_input(delta: float) -> void:
+	if not GameInput.is_pressed(device_id, &"interact"):
+		_revive_progress = 0.0
+		return
+	var target := _nearest_downed()
+	if target < 0:
+		_revive_progress = 0.0
+		return
+	_revive_progress += delta
+	if _revive_progress >= DownSystem.REVIVE_TIME:
+		_revive_progress = 0.0
+		DownSystem.request_revive.rpc_id(1, slot_id, target)
+
+
+func _nearest_downed() -> int:
+	var best := -1
+	var best_distance := REVIVE_RANGE
+	for node in get_tree().get_nodes_in_group("player_characters"):
+		if node == self or not node.is_downed or node.carried_by_slot >= 0:
+			continue
+		var distance := global_position.distance_to(node.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = node.slot_id
+	return best
 
 
 ## 疊高不佔按鍵（docs/06）：往下探到隊友的頭就送出請求。
@@ -419,6 +500,44 @@ func _process_carry_input(delta: float) -> void:
 	elif _throw_charge > 0.0:
 		CarrySystem.request_throw.rpc_id(1, slot_id, _throw_charge)
 		_throw_charge = 0.0
+
+
+## 由 DownSystem 呼叫，不要從別的地方寫。
+func on_downed(impulse: Vector3) -> void:
+	is_downed = true
+	velocity = impulse
+	_revive_progress = 0.0
+	_throw_charge = 0.0
+	_visual.rotation.x = deg_to_rad(DOWNED_PITCH)
+	_character.play_action(&"death")
+
+
+func on_revived() -> void:
+	is_downed = false
+	_revive_progress = 0.0
+	_visual.rotation.x = 0.0
+
+
+## 倒地時仍受重力與碰撞影響——被丟出去的人要能滾下斜坡，
+## 那是「事故就是內容」的一部分。但沒有輸入，也不能自行復活（docs/04）。
+##
+## 位置仍由自己這端算（TD-02），不是 TD-06 說的 host 權威根位置。
+## 現階段可以這樣，因為倒地還是 CharacterBody3D 在跑、而且扶起要按住
+## 2.5 秒，30 Hz 同步的落差不影響判定。等換成真正的 PhysicalBone3D
+## ragdoll 時要回頭改——那時骨骼各機自算，根位置就必須是 host 說了算。
+func _process_downed(delta: float) -> void:
+	if not is_multiplayer_authority():
+		_process_remote(delta)
+		return
+	if not is_on_floor():
+		velocity.y -= _gravity * FALL_MULTIPLIER * delta
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	horizontal = horizontal.move_toward(Vector3.ZERO, SPEED / STOP_TIME * delta)
+	velocity.x = horizontal.x
+	velocity.z = horizontal.z
+	move_and_slide()
+	net_position = global_position
+	net_velocity = velocity
 
 
 ## 由 StackSystem 呼叫，不要從別的地方寫。

@@ -20,6 +20,7 @@ const KEY_BINDINGS := {
 	"attack": [KEY_J],
 	"grab": [KEY_F],
 	"interact": [KEY_E],
+	"debug_down": [KEY_K],
 }
 
 ## 手把按鍵對應，依 docs/06-controls-ui.md 的配置表（Xbox 標示）。
