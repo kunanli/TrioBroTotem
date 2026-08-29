@@ -70,7 +70,7 @@ var _struggle: float = 0.0
 @onready var grab_probe: Area3D = $Visual/GrabProbe
 @onready var _visual: Node3D = $Visual
 @onready var _label: Label3D = $NameLabel
-@onready var _camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
+@onready var _camera: Camera3D = $CameraPivot/Camera3D
 @onready var _carryable: Carryable = $Carryable
 
 
