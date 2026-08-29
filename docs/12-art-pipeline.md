@@ -25,12 +25,26 @@
 |---|---|
 | `python3 tools/inspect_model.py <模型.glb>` | 驗貨。列出骨架階層、面數、動畫清單，比對本文規格與 TD-07 命名。只需要 Python |
 | `python3 tools/inspect_model.py <模型.glb> --map m.json` | 同上，並輸出骨骼改名對照表 |
+| `blender --background --python tools/inspect_fbx.py -- <資料夾>` | 同上，但讀 FBX。需要 Blender |
 | `blender --background --python tools/blender_normalize.py -- --input a.glb --output b.glb` | 正規化。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
 
 `inspect_model.py` 在有擋住管線的問題時 exit code 非 0，可以掛進 CI。
 
 `blender_normalize.py` 在 Blender 5.0 實測跑通；匯出參數會依版本過濾，動作曲線同時支援
 4.4 前後兩種擺法，所以 4.x 也能跑。
+
+### Meshy 的匯出設定（實測後補上）
+
+第一批匯出全部沒過，三個問題都出在 Meshy 端的設定，不是模型本身：
+
+| 問題 | 怎麼改 |
+|---|---|
+| 沒有骨架 | Meshy 的 **Rigging** 是獨立步驟，要另外跑。沒跑就只是靜態模型 |
+| 面數 1.3–23 倍超標 | 生成時就要壓，**不要事後 decimate**——減面會優先吃掉關節處的 edge loop，正好是變形最需要它的地方 |
+| 貼圖 4K（單張 25 MB） | 本作是低多邊形卡通風、色塊乾淨（docs/09），512–1024 就夠。而且分屏要渲染兩次 |
+
+匯出格式選 **GLB**。FBX 是二進位私有格式，`inspect_model.py` 讀不了，
+要驗貨得動用 Blender（`inspect_fbx.py`），慢得多。
 
 **兩個實測踩到、值得記住的坑**：
 

@@ -10,15 +10,23 @@ extends CharacterBody3D
 ## 抓取與投擲**不走**這條路徑——那是 host 權威，見 CarrySystem。
 ## 這裡只負責「送出請求」與「被抓時不要自己亂動」。
 
-const SPEED := 5.5
-const ACCELERATION := 14.0
-const JUMP_VELOCITY := 5.2
-const TURN_SPEED := 14.0
+const SPEED := 6.0
+const JUMP_VELOCITY := 5.4
 
-## 空中的加速度倍率。地面上要能急停急轉（Overcooked 基準要求回饋快），
-## 但空中若也用同樣的加速度，被丟出去的人會在半秒內把水平速度磨光，
-## 飛不到三公尺——投擲就變成沒有意義的動作。
-const AIR_CONTROL := 0.15
+## 手感參數一律用「時間」而不是「加速度」表示——
+## 「0.1 秒到全速」比「每秒 60 單位」好調得多，改速度時也不必連帶重算。
+## 基準是 Overcooked：回饋速度優先，不要重量感（docs/05）。
+const ACCEL_TIME := 0.10   ## 靜止到全速
+const STOP_TIME := 0.07    ## 全速到靜止，比加速更快，急停才俐落
+const TURN_TIME := 0.07    ## 轉向到位
+
+## 空中還保有多少控制力。0 = 完全不能轉向，1 = 與地面相同。
+## 太高的話被丟出去的人可以自己飛回來，投擲就沒意義了。
+const AIR_CONTROL := 0.25
+
+## 下墜時的重力倍率。上升慢、下墜快是跳躍手感的標準做法——
+## 等速拋物線會讓角色在空中「飄」，與 Overcooked 基準相反。
+const FALL_MULTIPLIER := 1.7
 
 ## 同步頻率。物理跑 60Hz，網路送 30Hz——M0 要調的就是這個數字。
 const SYNC_HZ := 30.0
@@ -37,6 +45,17 @@ const STRUGGLE_TO_BREAK := 2.4
 
 ## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
 const CARRY_SPEED_PENALTY := 0.7
+
+## 鏡頭：距離、高度、看向角色身上多高的點。
+const CAMERA_DISTANCE := 6.5
+const CAMERA_HEIGHT := 3.0
+const CAMERA_TARGET_HEIGHT := 1.2
+
+## 鏡頭追上角色所需的時間。0 = 硬綁在身上（會很跳），太大會拖泥帶水。
+const CAMERA_FOLLOW_TIME := 0.10
+
+const MOUSE_SENSITIVITY := 0.005
+const STICK_LOOK_SPEED := 2.5
 
 const SLOT_COLORS := [
 	Color(0.90, 0.42, 0.32),  # 0 泥土色
@@ -66,11 +85,14 @@ var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 
 var _throw_charge: float = 0.0
 var _struggle: float = 0.0
 
+## 鏡頭的水平角度。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
+var _camera_yaw: float = 0.0
+
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
 @onready var _visual: Node3D = $Visual
 @onready var _label: Label3D = $NameLabel
-@onready var _camera: Camera3D = $CameraPivot/Camera3D
+@onready var _camera: Camera3D = $Camera3D
 @onready var _carryable: Carryable = $Carryable
 
 
@@ -95,6 +117,11 @@ func _ready() -> void:
 	# M0 一個 peer 只負責一個 slot，所以這樣就夠。
 	# 本地分屏（TD-04）時要改成每個 slot 一個 SubViewport，不是靠 current。
 	_camera.current = is_multiplayer_authority() and not is_ai
+	# 鏡頭脫離角色的座標系，改成自己平滑追上去。
+	# 硬綁在角色身上時，角色每個物理幀的位移會原封不動變成鏡頭的抖動。
+	_camera.top_level = true
+	_camera.global_position = _camera_goal()
+	_camera.look_at(_camera_focus(), Vector3.UP)
 
 	if is_multiplayer_authority():
 		net_position = global_position
@@ -118,6 +145,44 @@ func _setup_synchronizer() -> void:
 	sync.replication_config = config
 	sync.replication_interval = 1.0 / SYNC_HZ
 	add_child(sync)
+
+
+## 鏡頭看的目標點：角色身上稍高的位置，不是腳底。
+func _camera_focus() -> Vector3:
+	return global_position + Vector3.UP * CAMERA_TARGET_HEIGHT
+
+
+## 鏡頭應該在的位置：以 _camera_yaw 繞著角色轉。
+func _camera_goal() -> Vector3:
+	var offset := Basis(Vector3.UP, _camera_yaw) * Vector3(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE)
+	return _camera_focus() + offset
+
+
+## 鏡頭的水平基底。移動輸入要換算到這個座標系——
+## 世界座標移動配上不會轉的鏡頭，在 3D 第三人稱裡一定會覺得怪。
+func _camera_basis() -> Basis:
+	return Basis(Vector3.UP, _camera_yaw)
+
+
+func _input(event: InputEvent) -> void:
+	if not _camera.current:
+		return
+	var motion := event as InputEventMouseMotion
+	if motion == null:
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		return
+	_camera_yaw -= motion.relative.x * MOUSE_SENSITIVITY
+
+
+func _process(delta: float) -> void:
+	if not _camera.current:
+		return
+	_camera_yaw -= GameInput.get_look_delta(device_id) * STICK_LOOK_SPEED * delta
+	# 指數平滑：不受影格率影響，60 與 144 fps 的追隨速度一致。
+	var t := 1.0 - exp(-delta / CAMERA_FOLLOW_TIME)
+	_camera.global_position = _camera.global_position.lerp(_camera_goal(), t)
+	_camera.look_at(_camera_focus(), Vector3.UP)
 
 
 ## 面向的基底。投擲方向讀這個，不是讀 CharacterBody3D 的 transform——
@@ -160,28 +225,33 @@ func _process_authority(delta: float) -> void:
 	# 每一幀都問，不能只在著地時問——手把的 just_pressed 是自己做的邊緣偵測，
 	# 漏問幾幀狀態就會過期，導致「握著跳鍵落地後跳不起來」。
 	var jump_pressed := GameInput.is_jump_pressed(device_id)
-	if not is_on_floor():
-		velocity.y -= _gravity * delta
-	elif jump_pressed:
-		velocity.y = JUMP_VELOCITY
+	if is_on_floor():
+		# 著地時一定要歸零。原本只在跳躍時才寫 velocity.y，
+		# 落地後那個很大的負值會一直留著——走下平台的瞬間會像被吸下去。
+		velocity.y = JUMP_VELOCITY if jump_pressed else 0.0
+	else:
+		velocity.y -= _gravity * (FALL_MULTIPLIER if velocity.y < 0.0 else 1.0) * delta
 
 	var input := GameInput.get_move_vector(device_id)
-	# M0 的鏡頭方向固定，所以直接用世界座標。
-	# 鏡頭規則尚未定案（見 docs/08-multiplayer-camp.md 鏡頭規則），
-	# 定案前不做鏡頭相對移動，免得改兩次。
-	var wish := Vector3(input.x, 0.0, input.y)
+	var wish := _camera_basis() * Vector3(input.x, 0.0, input.y)
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 
 	var speed := SPEED * (CARRY_SPEED_PENALTY if is_carrying() else 1.0)
-	var target := wish * speed
-	var control := ACCELERATION if is_on_floor() else ACCELERATION * AIR_CONTROL
-	velocity.x = move_toward(velocity.x, target.x, control * delta)
-	velocity.z = move_toward(velocity.z, target.z, control * delta)
+	var moving := wish.length_squared() > 0.01
+	# 水平速度整個向量一起算，不要拆成 x 與 z 各自 move_toward——
+	# 分軸處理會讓斜向的加速度比正向快 √2 倍，轉向時也會有稜有角。
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	var rate := speed / (ACCEL_TIME if moving else STOP_TIME)
+	if not is_on_floor():
+		rate *= AIR_CONTROL
+	horizontal = horizontal.move_toward(wish * speed, rate * delta)
+	velocity.x = horizontal.x
+	velocity.z = horizontal.z
 	move_and_slide()
 
-	if wish.length_squared() > 0.01:
-		_yaw = lerp_angle(_yaw, atan2(-wish.x, -wish.z), TURN_SPEED * delta)
+	if moving:
+		_yaw = lerp_angle(_yaw, atan2(-wish.x, -wish.z), 1.0 - exp(-delta / TURN_TIME))
 
 	_process_carry_input(delta)
 
@@ -233,7 +303,7 @@ func _process_remote(delta: float) -> void:
 	if global_position.distance_to(net_position) > TELEPORT_DISTANCE:
 		global_position = net_position
 	else:
-		var weight_factor := clampf(REMOTE_LERP * delta, 0.0, 1.0)
+		var weight_factor := 1.0 - exp(-REMOTE_LERP * delta)
 		global_position = global_position.lerp(net_position, weight_factor)
 	velocity = net_velocity
-	_yaw = lerp_angle(_yaw, net_yaw, clampf(REMOTE_LERP * delta, 0.0, 1.0))
+	_yaw = lerp_angle(_yaw, net_yaw, 1.0 - exp(-REMOTE_LERP * delta))

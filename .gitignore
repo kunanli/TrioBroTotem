@@ -14,6 +14,24 @@ export_presets.cfg
 *.dmg
 *.zip
 
+# 原始模型匯出不進版控（見 assets/source/README.md）
+#
+# 理由：Meshy 的原始匯出隨時可以重新下載，而且每次重生成都是新的一份。
+# 它們又大（單一角色連貼圖 80 MB）又不是最終資產。版控只放正規化後、
+# 真正進遊戲的檔案——那些每隻只有幾 MB。
+#
+# 只擋二進位，README 與資料夾結構仍然追蹤。
+assets/source/**/*.fbx
+assets/source/**/*.glb
+assets/source/**/*.gltf
+assets/source/**/*.obj
+assets/source/**/*.blend
+assets/source/**/*.png
+assets/source/**/*.jpg
+assets/source/**/*.jpeg
+assets/source/**/*.tga
+assets/source/**/*.exr
+
 # 美術暫存
 *.blend1
 *.blend2
