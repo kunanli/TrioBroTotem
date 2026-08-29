@@ -25,8 +25,12 @@
 |---|---|
 | `python3 tools/inspect_model.py <模型.glb>` | 驗貨。列出骨架階層、面數、動畫清單，比對本文規格與 TD-07 命名。只需要 Python |
 | `python3 tools/inspect_model.py <模型.glb> --map m.json` | 同上，並輸出骨骼改名對照表 |
-| `blender --background --python tools/inspect_fbx.py -- <資料夾>` | 同上，但讀 FBX。需要 Blender |
-| `blender --background --python tools/blender_normalize.py -- --input a.glb --output b.glb` | 正規化。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
+| `python3 tools/run_blender.py inspect <資料夾>` | 同上，但讀 FBX。需要 Blender |
+| `python3 tools/run_blender.py normalize --input a.fbx --output b.glb` | 正規化。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
+
+`run_blender.py` 會自己找 Blender（`BLENDER` 環境變數 → PATH → 各平台常見安裝位置，
+多版本取最新），不必每次手打一長串路徑。找不到時會列出所有找過的地方。
+它等同於手打 `blender --background --python tools/<腳本> -- <參數>`。
 
 `inspect_model.py` 在有擋住管線的問題時 exit code 非 0，可以掛進 CI。
 

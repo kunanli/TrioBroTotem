@@ -19,7 +19,9 @@ from pathlib import Path
 import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from inspect_model import REQUIRED_BONES, TRI_MAX, TRI_MIN, guess_standard_name  # noqa: E402
+from inspect_model import (  # noqa: E402
+    REQUIRED_BONES, TRI_MAX, TRI_MIN, guess_standard_name, is_leaf_bone,
+)
 
 
 def targets(argv):
@@ -75,7 +77,13 @@ def inspect(path):
         if guess:
             mapped[guess] = bone
     missing = [b for b in REQUIRED_BONES if b not in mapped]
+    extras = [b for b in bones if guess_standard_name(b) is None]
+    leaves = [b for b in extras if is_leaf_bone(b)]
     print(f"  骨骼 {len(bones)} 根，必要骨骼 {len(REQUIRED_BONES) - len(missing)}/{len(REQUIRED_BONES)}")
+    if len(extras) > len(leaves):
+        print(f"  角色專屬骨鏈：{'、'.join(b for b in extras if not is_leaf_bone(b))}")
+    if leaves:
+        print(f"  葉端骨骼 {len(leaves)} 根（FBX 匯出常見，無害）")
     if missing:
         print(f"  ✗ 對不上：{'、'.join(missing)}")
         ok = False

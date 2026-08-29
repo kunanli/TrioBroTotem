@@ -32,7 +32,7 @@ from pathlib import Path
 import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from inspect_model import guess_standard_name  # noqa: E402
+from inspect_model import guess_standard_name, is_leaf_bone  # noqa: E402
 
 TRI_MAX = 15_000
 
@@ -242,9 +242,13 @@ def main():
     mapping = build_mapping(armature, args.map)
     rename_bones(armature, meshes, mapping)
 
-    unmapped = [b.name for b in armature.data.bones if guess_standard_name(b.name) is None]
+    extras = [b.name for b in armature.data.bones if guess_standard_name(b.name) is None]
+    leaves = [b for b in extras if is_leaf_bone(b)]
+    unmapped = [b for b in extras if not is_leaf_bone(b)]
     if unmapped:
         print(f"未對應到 profile 的骨骼（角色專屬骨鏈，正常）：{', '.join(unmapped)}")
+    if leaves:
+        print(f"葉端骨骼 {len(leaves)} 根（FBX 匯出常見，無害）")
 
     apply_transforms([armature] + meshes)
 

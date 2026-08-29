@@ -65,6 +65,15 @@ SIDED_ALIASES = {
 FINGERS = {"thumb": "Thumb", "index": "Index", "middle": "Middle", "ring": "Ring", "pinky": "Little", "little": "Little"}
 
 
+## FBX 匯出器會替每條骨鏈補上葉端骨骼（LeftHand_end 之類）。
+## 它們不參與蒙皮也不參與 retarget，混在「角色專屬骨鏈」裡只會製造雜訊。
+LEAF_SUFFIXES = ("_end", "_tip", ".end", "_leaf")
+
+
+def is_leaf_bone(name):
+    return name.lower().endswith(LEAF_SUFFIXES)
+
+
 def _normalise(name):
     """mixamorig:LeftForeArm -> ('left', 'forearm')；thigh_R -> ('right', 'thigh')"""
     n = name.split(":")[-1]
@@ -265,13 +274,18 @@ def inspect_one(model_path, map_path):
     if optional_hit:
         print("選配骨骼：" + "、".join(optional_hit))
 
-    unmapped = [nodes[j].get("name", "") for j in joints
-                if guess_standard_name(nodes[j].get("name", "")) is None
-                and nodes[j].get("name", "") not in REQUIRED_BONES + OPTIONAL_BONES]
+    extras = [nodes[j].get("name", "") for j in joints
+              if guess_standard_name(nodes[j].get("name", "")) is None
+              and nodes[j].get("name", "") not in REQUIRED_BONES + OPTIONAL_BONES]
+    leaves = [b for b in extras if is_leaf_bone(b)]
+    unmapped = [b for b in extras if not is_leaf_bone(b)]
     if unmapped:
         print(f"\n## 角色專屬骨鏈（{len(unmapped)} 根）")
         print("、".join(unmapped))
         print("這些不參與 retarget，掛在 profile 之外由角色專屬動畫驅動（例如長頸鹿的脖子）。")
+    if leaves:
+        print(f"\n## 葉端骨骼（{len(leaves)} 根，FBX 匯出常見，無害）")
+        print("、".join(leaves))
 
     animations = gltf.get("animations", [])
     print(f"\n## 動畫\n{len(animations)} 支")
