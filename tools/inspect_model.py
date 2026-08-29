@@ -3,8 +3,11 @@
 
 只用標準函式庫，不需要 Blender、不需要 Godot、不需要 pip install。
 
-    python3 tools/inspect_model.py assets/source/pig.glb
-    python3 tools/inspect_model.py assets/source/pig.glb --map bone_map.json
+    python3 tools/inspect_model.py assets/source
+    python3 tools/inspect_model.py assets/source/Pig_Warrior/pig.glb
+    python3 tools/inspect_model.py assets/source/Pig_Warrior/pig.glb --map bone_map.json
+
+給資料夾就遞迴檢查底下所有 .glb / .gltf。
 
 檢查依據：
   docs/12-art-pipeline.md   資產規格（T-pose、5,000-15,000 三角面）
@@ -161,14 +164,45 @@ def animation_length(gltf, anim):
 
 def main():
     parser = argparse.ArgumentParser(description="檢查 glTF/GLB 是否符合 TrioBroTotem 的資產規格")
-    parser.add_argument("model", type=Path)
+    parser.add_argument("model", type=Path, help="模型檔或含有模型的資料夾")
     parser.add_argument("--map", type=Path, help="把猜到的骨骼改名對照表寫成 JSON")
     args = parser.parse_args()
 
     if not args.model.exists():
-        sys.exit(f"找不到檔案：{args.model}")
+        sys.exit(f"找不到：{args.model}")
 
-    gltf = load_gltf(args.model)
+    if args.model.is_dir():
+        return inspect_folder(args.model)
+    return inspect_one(args.model, args.map)
+
+
+def inspect_folder(folder):
+    models = sorted(folder.rglob("*.glb")) + sorted(folder.rglob("*.gltf"))
+    fbx = sorted(folder.rglob("*.fbx"))
+    if not models and not fbx:
+        sys.exit(f"{folder} 底下找不到任何模型檔（.glb / .gltf / .fbx）")
+
+    failed = 0
+    for model in models:
+        print("=" * 60)
+        if inspect_one(model, None) != 0:
+            failed += 1
+    if fbx:
+        print("=" * 60)
+        print(f"\n另外有 {len(fbx)} 個 .fbx，這支工具讀不了（二進位私有格式）：")
+        for path in fbx:
+            print(f"  {path}")
+        print("\n下次匯出請選 GLB。現有的 FBX 要驗貨得動用 Blender：")
+        print(f"  blender --background --python tools/inspect_fbx.py -- {folder}")
+    if models:
+        print(f"\n共 {len(models)} 個 glTF 檔，{failed} 個沒過。")
+    return 1 if (failed or (fbx and not models)) else 0
+
+
+def inspect_one(model_path, map_path):
+    args_map = map_path
+    gltf = load_gltf(model_path)
+    args = type("Args", (), {"model": model_path, "map": args_map})()
     nodes = gltf.get("nodes", [])
     parents = build_parents(gltf)
     problems, warnings = [], []
