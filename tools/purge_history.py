@@ -32,11 +32,15 @@ def git(*args, check=True):
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=check)
 
 
-def pack_size():
+def repo_size():
+    """.git 的實際大小。count-objects 的 size-pack 在物件還沒打包時會顯示 0，
+    看起來像已經清乾淨了，很容易誤判。"""
+    total = sum(f.stat().st_size for f in (ROOT / ".git").rglob("*") if f.is_file())
+    packed = "?"
     for line in git("count-objects", "-vH").stdout.split("\n"):
         if line.startswith("size-pack:"):
-            return line.strip()
-    return "size-pack: ?"
+            packed = line.split(":", 1)[1].strip()
+    return f".git 共 {total / 1e6:.0f} MB（其中已打包 {packed}）"
 
 
 def matched_files():
@@ -68,7 +72,7 @@ def main():
         print(f"  {f.relative_to(ROOT)}")
     if len(files) > 8:
         print(f"  ...另外 {len(files) - 8} 個")
-    print(f"\n目前 repo：{pack_size()}")
+    print(f"\n目前 repo：{repo_size()}")
 
     if args.dry_run or not args.yes:
         print("\n這是 dry run。確定要執行請加 --yes（建議同時加 --backup-to <repo 外的資料夾>）。")
@@ -103,7 +107,7 @@ def main():
     leftover = git("rev-list", "--objects", "--all").stdout
     still_there = [ln for ln in leftover.split("\n") if ln.endswith((".fbx", ".png"))]
     print(f"\n歷史中殘留的模型／貼圖：{len(still_there)} 個（應為 0）")
-    print(pack_size())
+    print(repo_size())
 
     print("\n最後一步——強制推送（確認上面的數字都對再執行）：")
     print("    git push --force origin main")
