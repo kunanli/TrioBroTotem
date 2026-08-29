@@ -26,7 +26,8 @@
 | `python3 tools/inspect_model.py <模型.glb>` | 驗貨。列出骨架階層、面數、動畫清單，比對本文規格與 TD-07 命名。只需要 Python |
 | `python3 tools/inspect_model.py <模型.glb> --map m.json` | 同上，並輸出骨骼改名對照表 |
 | `python3 tools/run_blender.py inspect <資料夾>` | 同上，但讀 FBX。需要 Blender |
-| `python3 tools/run_blender.py normalize --input a.fbx --output b.glb` | 正規化。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
+| `python3 tools/run_blender.py normalize --input a.fbx --output b.glb` | 正規化單一模型。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
+| `python3 tools/run_blender.py normalize-all` | 把 `assets/source/<角色>/` 每一隻都正規化到 `trio-project/assets/characters/<角色>.glb`。每隻跑一次獨立的 Blender，不共用場景 |
 
 `run_blender.py` 會自己找 Blender（`BLENDER` 環境變數 → PATH → 各平台常見安裝位置，
 多版本取最新），不必每次手打一長串路徑。找不到時會列出所有找過的地方。
@@ -39,13 +40,20 @@
 
 ### Meshy 的匯出設定（實測後補上）
 
-第一批匯出全部沒過，三個問題都出在 Meshy 端的設定，不是模型本身：
+前兩批匯出全部沒過，問題都出在 Meshy 端的設定，不是模型本身：
 
 | 問題 | 怎麼改 |
 |---|---|
 | 沒有骨架 | Meshy 的 **Rigging** 是獨立步驟，要另外跑。沒跑就只是靜態模型 |
-| 面數 1.3–23 倍超標 | 生成時就要壓，**不要事後 decimate**——減面會優先吃掉關節處的 edge loop，正好是變形最需要它的地方 |
+| 面數大幅超標（曾出現 22 倍） | 生成時就要壓。**大幅超標時不要靠事後 decimate**——減面會優先吃掉關節處的 edge loop，正好是變形最需要它的地方 |
 | 貼圖 4K（單張 25 MB） | 本作是低多邊形卡通風、色塊乾淨（docs/09），512–1024 就夠。而且分屏要渲染兩次 |
+
+**第三批（rig 後）通過了**：三隻都是 24 根骨骼、必要骨骼 17/17、`headfront` 為共同的角色專屬骨鏈。
+骨架結構三隻一致——這正是共用動畫的前提（見上方共用骨架原則）。
+
+面數 19,508 / 10,325 / 19,473，其中兩隻約 1.3 倍超標。這個幅度靠 decimate
+（比例 0.77）處理是可以接受的，跟 22 倍那種要重生成的情況不同。
+若減面後關節處明顯壓扁，就改用 `--tri-max 20000` 放寬，不要硬壓。
 
 匯出格式選 **GLB**。FBX 是二進位私有格式，`inspect_model.py` 讀不了，
 要驗貨得動用 Blender（`inspect_fbx.py`），慢得多。

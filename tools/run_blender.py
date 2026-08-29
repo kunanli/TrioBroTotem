@@ -30,6 +30,10 @@ COMMANDS = {
     "normalize": "blender_normalize.py",
 }
 
+## normalize-all 的預設路徑：assets/source/<角色>/ 的模型 → 這裡的 <角色>.glb
+SOURCE_DIR = TOOLS.parent / "assets" / "source"
+OUTPUT_DIR = TOOLS.parent / "trio-project" / "assets" / "characters"
+
 # Blender 輸出的雜訊。預設濾掉，--raw 可以保留。
 NOISE = re.compile(r"^\d{2}:\d{2}:\d{2} \| (INFO|WARNING)|^(Info|Warning|FBX|Blender quit)")
 
@@ -67,12 +71,71 @@ def find_blender():
     return None, tried
 
 
+def run(blender, script, extra, raw):
+    command = [blender, "--background", "--python", str(script), "--", *extra]
+    # 子行程的輸出一律當 UTF-8 讀。Windows 預設會用系統編碼（cp1252）解碼，
+    # 而管線的腳本印的是中文——一撞到中文位元組就 UnicodeDecodeError，
+    # 接著 stdout 變成 None，錯誤訊息會離真正的原因非常遠。
+    # PYTHONIOENCODING 讓 Blender 內嵌的 Python 也用 UTF-8 寫出。
+    environment = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run(
+        command,
+        capture_output=not raw,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=environment,
+    )
+    if not raw:
+        output = (result.stdout or "") + (result.stderr or "")
+        for line in output.split("\n"):
+            if line.strip() and not NOISE.match(line):
+                print(line)
+    return result.returncode
+
+
+def normalize_all(blender, args):
+    """assets/source/<角色>/ 的第一個模型 → trio-project/assets/characters/<角色>.glb
+
+    每個角色跑一次獨立的 Blender，不共用場景——批次處理最容易出的錯
+    就是前一個角色的殘留資料混進下一個。
+    """
+    if not SOURCE_DIR.is_dir():
+        print(f"找不到 {SOURCE_DIR}", file=sys.stderr)
+        return 1
+
+    script = TOOLS / COMMANDS["normalize"]
+    failed = 0
+    handled = 0
+    for folder in sorted(p for p in SOURCE_DIR.iterdir() if p.is_dir()):
+        models = sorted(folder.rglob("*.fbx")) + sorted(folder.rglob("*.glb"))
+        if not models:
+            continue
+        if len(models) > 1:
+            print(f"! {folder.name} 底下有 {len(models)} 個模型，只處理 {models[0].name}")
+        output = OUTPUT_DIR / f"{folder.name.lower()}.glb"
+        print(f"\n{'=' * 60}\n{folder.name} → {output.relative_to(TOOLS.parent)}")
+        extra = ["--input", str(models[0]), "--output", str(output), *args.rest]
+        if run(blender, script, extra, args.raw) != 0:
+            failed += 1
+        handled += 1
+
+    print(f"\n共 {handled} 個角色，{failed} 個失敗。")
+    if handled and not failed:
+        print(f"接著驗貨：python tools/inspect_model.py {OUTPUT_DIR.relative_to(TOOLS.parent)}")
+    return 1 if failed else 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="找到 Blender 並執行美術管線腳本",
         epilog="指令：" + "、".join(COMMANDS),
     )
-    parser.add_argument("command", choices=sorted(COMMANDS), help="要跑哪一支腳本")
+    parser.add_argument(
+        "command",
+        choices=sorted(list(COMMANDS) + ["normalize-all"]),
+        help="要跑哪一支腳本；normalize-all 會處理 assets/source 底下每個角色資料夾",
+    )
     parser.add_argument("--raw", action="store_true", help="保留 Blender 的完整輸出")
     parser.add_argument("rest", nargs=argparse.REMAINDER, help="傳給該腳本的參數")
     args = parser.parse_args()
@@ -90,29 +153,14 @@ def main():
         )
         return 1
 
+    print(f"Blender：{blender}\n")
+    if args.command == "normalize-all":
+        return normalize_all(blender, args)
+
     script = TOOLS / COMMANDS[args.command]
     command = [blender, "--background", "--python", str(script), "--", *args.rest]
-    print(f"Blender：{blender}\n")
 
-    # 子行程的輸出一律當 UTF-8 讀。Windows 預設會用系統編碼（cp1252）解碼，
-    # 而管線的腳本印的是中文——一撞到中文位元組就 UnicodeDecodeError，
-    # 接著 stdout 變成 None，錯誤訊息會離真正的原因非常遠。
-    # PYTHONIOENCODING 讓 Blender 內嵌的 Python 也用 UTF-8 寫出。
-    environment = dict(os.environ, PYTHONIOENCODING="utf-8")
-    result = subprocess.run(
-        command,
-        capture_output=not args.raw,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=environment,
-    )
-    if not args.raw:
-        output = (result.stdout or "") + (result.stderr or "")
-        for line in output.split("\n"):
-            if line.strip() and not NOISE.match(line):
-                print(line)
-    return result.returncode
+    return run(blender, script, args.rest, args.raw)
 
 
 if __name__ == "__main__":
