@@ -83,6 +83,16 @@ def check_scenes():
             if not res_to_path(res).exists():
                 problems.append(f"{rel}: ext_resource 指到不存在的檔案：{res}")
 
+        declared = re.match(r"\[gd_scene load_steps=(\d+)", text)
+        if declared:
+            actual = (len(re.findall(r"^\[ext_resource ", text, re.M))
+                      + len(re.findall(r"^\[sub_resource ", text, re.M)) + 1)
+            if int(declared.group(1)) != actual:
+                problems.append(
+                    f"{rel}: load_steps 宣告 {declared.group(1)}，實際 {actual}"
+                    "（手動編輯 .tscn 後常忘了改）"
+                )
+
         defined = set(re.findall(r'^\[(?:ext|sub)_resource[^\]]*id="([^"]+)"', text, re.M))
         used = set(re.findall(r'(?:SubResource|ExtResource)\("([^"]+)"\)', text))
         for missing in sorted(used - defined):
