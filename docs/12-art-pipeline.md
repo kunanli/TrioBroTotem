@@ -1,8 +1,10 @@
 # 美術管線（Meshy → Godot）
 
-### 必須先解決
+### 授權（已解決）
 
-**授權**：Meshy 免費方案輸出為 CC BY 4.0 且模型公開。商業上市必須使用付費方案取得完整商用權與私有資產。**這件事要在產出任何正式資產前確認。**
+**採用 Meshy 付費方案**，取得完整商用權與私有資產。免費方案輸出為 CC BY 4.0 且模型公開，與商業上市不相容，因此不得用於任何會進入上市版的資產。
+
+> 用免費方案產出的暫時素材若曾進過 repo，上市前要確認已全部替換掉。
 
 ### 共用骨架原則
 
@@ -15,7 +17,28 @@
 
 **命名規範已定案**：採用 Godot 的 `SkeletonProfileHumanoid`，不自創。好處是免費打開現成人形動畫庫可供 retarget。完整說明見〈[技術決策](13-tech-decisions.md)〉TD-07。
 
-**驗貨工具**：`python3 tools/inspect_model.py <模型.glb>` 會列出骨架階層、面數、動畫清單，並比對本文的資產規格與 TD-07 的命名規範，指出哪些骨骼對不上。加 `--map bone_map.json` 可輸出改名對照表給 Blender 腳本使用。只需要 Python，不需要 Blender 或 Godot。
+### 工具
+
+每隻動物都要重跑一次的雜事已經腳本化，不要用手點。
+
+| 指令 | 做什麼 |
+|---|---|
+| `python3 tools/inspect_model.py <模型.glb>` | 驗貨。列出骨架階層、面數、動畫清單，比對本文規格與 TD-07 命名。只需要 Python |
+| `python3 tools/inspect_model.py <模型.glb> --map m.json` | 同上，並輸出骨骼改名對照表 |
+| `blender --background --python tools/blender_normalize.py -- --input a.glb --output b.glb` | 正規化。改名骨骼（連帶頂點群組與動畫曲線）、套用 scale/rotation、超標時 decimate、匯出乾淨 GLB |
+
+`inspect_model.py` 在有擋住管線的問題時 exit code 非 0，可以掛進 CI。
+
+`blender_normalize.py` 在 Blender 5.0 實測跑通；匯出參數會依版本過濾，動作曲線同時支援
+4.4 前後兩種擺法，所以 4.x 也能跑。
+
+**兩個實測踩到、值得記住的坑**：
+
+1. **匯入檔常夾帶不屬於角色的物件。** 測試檔裡就混進一個 80 面的孤立網格。一起算面數會誤判、
+   一起匯出會進遊戲。腳本因此只認「parent 是骨架，或有指向該骨架的 Armature 修改器」的網格，
+   其餘一律移除並回報。
+2. **骨骼改名要連動三個地方**：骨骼本身、網格的頂點群組、動作的曲線路徑。漏掉第三個時，
+   骨架看起來完全正確，動畫卻整個不動，而且**不會有任何錯誤訊息**——這是最難查的一種壞法。
 
 ### 資產規格
 
