@@ -111,7 +111,16 @@ python3 tools/check_project.py
 pip install "gdtoolkit==4.*" godot-parser
 ```
 
-目前狀態：**GDScript 11/11 語法通過、gdlint 無問題、4 個場景解析成功、接線檢查無問題。**
+**最重要的一項是引擎編譯檢查**。設定 `GODOT` 環境變數指到執行檔就會自動啟用：
+
+```
+set GODOT=C:\path\to\Godot_v4.7.2-stable_win64.exe
+python tools/check_project.py
+```
+
+gdparse 只驗語法，抓不到 `Color.WEBGRAY`（常數不存在）或
+`var x := obj.unknown_method()`（型別推不出來）這一類——只有引擎抓得到。
+這兩個錯誤在第一次開專案時真的出現過。
 
 `$Visaul/CarryAnchor` 這種打錯的路徑在編輯器裡要執行到那一行才炸，
 而且訊息是「null instance」，離真正的原因很遠——接線檢查就是為了這一類問題。

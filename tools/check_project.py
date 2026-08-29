@@ -16,6 +16,16 @@
   - gdlint：風格與常見錯誤
   - godot-parser：.tscn 結構
 
+找得到 Godot 執行檔時做最重要的一項——**用引擎自己編譯一次**：
+  - 型別推導錯誤、不存在的常數或成員、資源載入失敗
+
+  gdparse 只驗語法，抓不到 `Color.WEBGRAY`（常數不存在）或
+  `var x := obj.unknown_method()`（推不出型別）這一類。只有引擎抓得到。
+
+  Godot 不在 PATH 上時，用環境變數指路：
+      set GODOT=C:\path\to\Godot_v4.7.2-stable_win64.exe   (Windows CMD)
+      export GODOT=/path/to/godot                             (Linux/macOS)
+
 exit code 非 0 表示有問題，可以直接掛進 CI。
 """
 
@@ -136,6 +146,36 @@ def run_optional(scripts):
     notes.append("godot-parser：場景全部解析成功")
 
 
+def check_with_godot():
+    """用 Godot 自己匯入一次專案。這是唯一抓得到型別錯誤的檢查。"""
+    import os
+
+    godot = os.environ.get("GODOT") or shutil.which("godot") or shutil.which("godot4")
+    if not godot:
+        notes.append("找不到 Godot 執行檔，跳過引擎編譯檢查（設定 GODOT 環境變數即可啟用）")
+        return
+
+    # --import 會匯入所有資源並結束，順便編譯每一支腳本。
+    # 舊版沒有這個旗標，退回 --editor --quit。
+    for flags in (["--import"], ["--editor", "--quit"]):
+        result = subprocess.run(
+            [godot, "--headless", "--path", str(PROJECT), *flags],
+            capture_output=True, text=True, timeout=300,
+        )
+        output = result.stdout + result.stderr
+        if "Unknown main loop type" in output or "unknown argument" in output.lower():
+            continue
+        errors = [
+            line.strip() for line in output.split("\n")
+            if ("ERROR" in line or "SCRIPT ERROR" in line) and "res://" in line
+        ]
+        for error in dict.fromkeys(errors):
+            problems.append(f"Godot: {error}")
+        notes.append(f"Godot 編譯檢查：{'無問題' if not errors else f'{len(errors)} 個錯誤'}")
+        return
+    notes.append("Godot 執行檔無法用 --import 或 --editor --quit 執行，跳過")
+
+
 def check_wiring():
     """接線檢查（節點路徑、autoload 成員、RPC 標註、訊號、群組）。"""
     try:
@@ -153,6 +193,7 @@ def main():
     check_scenes()
     run_optional(check_indentation())
     check_wiring()
+    check_with_godot()
 
     for note in notes:
         print(f"  {note}")

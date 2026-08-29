@@ -88,7 +88,7 @@ func _ready() -> void:
 	if slot_id >= 0:
 		material.albedo_color = SLOT_COLORS[slot_id % SLOT_COLORS.size()]
 	else:
-		material.albedo_color = Color.WEBGRAY
+		material.albedo_color = Color(0.6, 0.6, 0.6)
 	for mesh in _visual.find_children("*", "MeshInstance3D"):
 		mesh.material_override = material
 

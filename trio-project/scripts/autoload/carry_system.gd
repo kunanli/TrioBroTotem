@@ -147,7 +147,9 @@ func _throw_velocity(grabber: Node3D, carryable: Carryable, charge: float) -> Ve
 		THROW_WEIGHT_SCALE.x,
 		THROW_WEIGHT_SCALE.y
 	)
-	var forward := -grabber.facing_basis().z
+	# 明確標型別：grabber 宣告成 Node3D，facing_basis() 不是它的成員，
+	# 回傳型別未知，:= 推不出來。
+	var forward: Vector3 = -grabber.facing_basis().z
 	var speed := THROW_BASE_SPEED * (0.35 + 0.65 * clamped) * ratio
 	return (forward + Vector3.UP * THROW_LIFT).normalized() * speed
 
