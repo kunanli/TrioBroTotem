@@ -13,7 +13,7 @@
 
 **因此：所有角色一律做成擬人兩足，包含長頸鹿。**四足需要另一套骨架與另一條動畫產線，且 Meshy 的四足動畫選項較少。長頸鹿的脖子作為額外骨鏈附加在標準骨架上。
 
-> 此決定需回寫 〈角色與隊伍〉。
+**命名規範已定案**：採用 Godot 的 `SkeletonProfileHumanoid`，不自創。好處是免費打開現成人形動畫庫可供 retarget。完整說明見〈[技術決策](13-tech-decisions.md)〉TD-07。
 
 ### 資產規格
 
@@ -23,13 +23,13 @@
 | 拓撲 | 每個角色跑一次 Remesh，關節處需有 edge loop |
 | 面數 | 5,000–15,000 三角面（低於 Meshy 建議上限，因未來需支援分屏雙渲染） |
 | 匯出格式 | FBX（引擎管線）／GLB（Blender 與檢查用） |
-| 骨骼命名 | 統一規範，需在 M0 結束前定案 |
+| 骨骼命名 | `SkeletonProfileHumanoid`（TD-07） |
 
 ### Ragdoll 需自行建置
 
 Meshy 提供的是動畫用 rig。Godot 的 ragdoll 需要 PhysicalBone3D、各骨骼碰撞體、關節角度限制——這些必須在 Godot 端建立。「Create Physical Skeleton」可一鍵生成骨架，但碰撞形狀與 joint 限制全部需手調，否則會抽搐或炸開。
 
-**Ragdoll 是核心賣點，需單獨排工時（估 40–60 小時）。**
+**Ragdoll 是核心賣點，需單獨排工時（估 40–60 小時）。**這 40–60 小時大半花在手調碰撞形狀與關節限制，不是寫程式。網路同步策略與「離開 ragdoll 時的姿勢混合」見〈[技術決策](13-tech-decisions.md)〉TD-06。
 
 
 
