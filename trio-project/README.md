@@ -57,12 +57,15 @@ godot --path . -- --join=127.0.0.1
 
 ### 操作
 
-| 鍵 | 手把 | 動作 |
+| 鍵鼠 | 手把 | 動作 |
 |---|---|---|
 | WASD | 左搖桿 | 移動；被抓時變成掙扎 |
 | 空白鍵 | A | 跳 |
 | F | B | 抓取／放下 |
-| J（按住蓄力，放開擲出） | X | 投擲 |
+| 滑鼠左鍵 或 J（按住蓄力，放開擲出） | RT | 投擲 |
+
+手把的投擲是 RT 而鍵鼠是攻擊鍵，這個不對稱來自 docs/06——手把按鍵已經排滿，
+鍵鼠還有餘裕。鍵盤保留 J 是因為 M0 要在同一台機器上開三個視窗，用滑鼠會一直搶焦點。
 
 膠囊前面那塊小方塊是朝向指示。
 
@@ -94,14 +97,24 @@ Windows 用 [clumsy](https://jagt.github.io/clumsy/)，filter 設
 python3 tools/check_project.py
 ```
 
-純 Python 就能跑：檢查 autoload 與 main_scene 的路徑、`.tscn` 的資源參照與 parent 路徑、
-腳本縮排。裝了 `gdtoolkit` 與 `godot-parser` 之後還會做 GDScript 語法、風格與場景結構檢查：
+純 Python 就能跑：
+
+- `project.godot` 的 autoload 與 main_scene 路徑存在
+- `.tscn` 的資源參照與 parent 路徑
+- 腳本縮排
+- **接線**：腳本裡的 `$NodePath` 在掛著它的場景中存在、autoload 成員存在、
+  呼叫 `.rpc()` 的方法有 `@rpc` 標註、`.connect()` 的訊號與回呼存在、群組名有人加入
+
+裝了下面兩個之後還會做 GDScript 語法、風格與場景結構檢查：
 
 ```bash
 pip install "gdtoolkit==4.*" godot-parser
 ```
 
-目前狀態：**GDScript 7/7 語法通過、gdlint 無問題、3 個場景全部解析成功。**
+目前狀態：**GDScript 11/11 語法通過、gdlint 無問題、4 個場景解析成功、接線檢查無問題。**
+
+`$Visaul/CarryAnchor` 這種打錯的路徑在編輯器裡要執行到那一行才炸，
+而且訊息是「null instance」，離真正的原因很遠——接線檢查就是為了這一類問題。
 
 ## 但這份骨架仍未在引擎裡跑過
 

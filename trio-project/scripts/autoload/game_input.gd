@@ -27,7 +27,22 @@ const JOY_BINDINGS := {
 	"jump": JOY_BUTTON_A,
 	"attack": JOY_BUTTON_X,
 	"grab": JOY_BUTTON_B,
-	"interact": JOY_BUTTON_LEFT_SHOULDER,
+}
+
+## 扳機是類比軸不是按鍵。依 docs/06：RT 投擲、LT 互動／扶起。
+const JOY_TRIGGERS := {
+	"throw": JOY_AXIS_TRIGGER_RIGHT,
+	"interact": JOY_AXIS_TRIGGER_LEFT,
+}
+
+## 扳機壓到多深算按下。
+const TRIGGER_THRESHOLD := 0.5
+
+## 滑鼠對應。docs/06 的鍵鼠配置是左鍵攻擊（抓著東西時＝投擲）。
+## 鍵盤的 J 保留下來，因為 M0 要在同一台機器上開三個視窗測，
+## 用滑鼠會一直搶焦點。
+const MOUSE_BINDINGS := {
+	"attack": MOUSE_BUTTON_LEFT,
 }
 
 ## 搖桿的死區。低於這個值視為沒推。
@@ -46,6 +61,10 @@ func _ready() -> void:
 			var event := InputEventKey.new()
 			event.physical_keycode = keycode
 			InputMap.action_add_event(action_name, event)
+		if MOUSE_BINDINGS.has(action_name):
+			var click := InputEventMouseButton.new()
+			click.button_index = MOUSE_BINDINGS[action_name]
+			InputMap.action_add_event(action_name, click)
 
 
 ## device_id < 0 為鍵鼠，>= 0 為該編號的手把。
@@ -63,17 +82,28 @@ func get_move_vector(device_id: int) -> Vector2:
 func is_pressed(device_id: int, action: StringName) -> bool:
 	if device_id < 0:
 		return Input.is_action_pressed(action)
-	return Input.is_joy_button_pressed(device_id, JOY_BINDINGS[action])
+	return _joy_down(device_id, action)
 
 
 func is_just_pressed(device_id: int, action: StringName) -> bool:
 	if device_id < 0:
 		return Input.is_action_just_pressed(action)
 	var key := "%d:%s" % [device_id, action]
-	var held := Input.is_joy_button_pressed(device_id, JOY_BINDINGS[action])
+	var held := _joy_down(device_id, action)
 	var was_held: bool = _joy_held.get(key, false)
 	_joy_held[key] = held
 	return held and not was_held
+
+
+## 沒有對應的動作一律回傳 false，而不是拋出 KeyError——
+## 新增動作時忘了補手把對應不該讓整個角色停止回應。
+func _joy_down(device_id: int, action: StringName) -> bool:
+	var action_name := String(action)
+	if JOY_BINDINGS.has(action_name):
+		return Input.is_joy_button_pressed(device_id, JOY_BINDINGS[action_name])
+	if JOY_TRIGGERS.has(action_name):
+		return Input.get_joy_axis(device_id, JOY_TRIGGERS[action_name]) > TRIGGER_THRESHOLD
+	return false
 
 
 func is_jump_pressed(device_id: int) -> bool:
@@ -84,7 +114,10 @@ func is_grab_pressed(device_id: int) -> bool:
 	return is_just_pressed(device_id, &"grab")
 
 
-## 投擲不佔獨立按鍵：抓著東西時的攻擊鍵就是投擲（docs/06-controls-ui.md）。
+## 投擲：手把是 RT，鍵鼠是攻擊鍵（抓著東西時的攻擊就是投擲）。
+## 這個不對稱來自 docs/06——手把按鍵已經排滿，鍵鼠還有餘裕。
 ## 按住蓄力、放開擲出，所以這裡回傳的是「是否按住」而不是邊緣。
 func is_throw_held(device_id: int) -> bool:
-	return is_pressed(device_id, &"attack")
+	if device_id < 0:
+		return Input.is_action_pressed(&"attack")
+	return is_pressed(device_id, &"throw")

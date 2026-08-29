@@ -15,6 +15,11 @@ const ACCELERATION := 14.0
 const JUMP_VELOCITY := 5.2
 const TURN_SPEED := 14.0
 
+## 空中的加速度倍率。地面上要能急停急轉（Overcooked 基準要求回饋快），
+## 但空中若也用同樣的加速度，被丟出去的人會在半秒內把水平速度磨光，
+## 飛不到三公尺——投擲就變成沒有意義的動作。
+const AIR_CONTROL := 0.15
+
 ## 同步頻率。物理跑 60Hz，網路送 30Hz——M0 要調的就是這個數字。
 const SYNC_HZ := 30.0
 
@@ -170,8 +175,9 @@ func _process_authority(delta: float) -> void:
 
 	var speed := SPEED * (CARRY_SPEED_PENALTY if is_carrying() else 1.0)
 	var target := wish * speed
-	velocity.x = move_toward(velocity.x, target.x, ACCELERATION * delta)
-	velocity.z = move_toward(velocity.z, target.z, ACCELERATION * delta)
+	var control := ACCELERATION if is_on_floor() else ACCELERATION * AIR_CONTROL
+	velocity.x = move_toward(velocity.x, target.x, control * delta)
+	velocity.z = move_toward(velocity.z, target.z, control * delta)
 	move_and_slide()
 
 	if wish.length_squared() > 0.01:

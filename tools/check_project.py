@@ -9,6 +9,7 @@
   - .tscn 裡引用的 SubResource / ExtResource id 都有定義
   - .tscn 的 parent 路徑指得到實際節點
   - .gd 檔案縮排一致（不混用 tab 與空白）
+  - 接線（見 check_wiring.py）：節點路徑、autoload 成員、RPC 標註、訊號、群組
 
 有裝下面的工具時額外做（pip install "gdtoolkit==4.*" godot-parser）：
   - gdparse：GDScript 語法
@@ -23,6 +24,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = ROOT / "trio-project"
@@ -133,10 +136,23 @@ def run_optional(scripts):
     notes.append("godot-parser：場景全部解析成功")
 
 
+def check_wiring():
+    """接線檢查（節點路徑、autoload 成員、RPC 標註、訊號、群組）。"""
+    try:
+        import check_wiring
+    except ImportError:
+        notes.append("check_wiring.py 不在同一個資料夾，跳過接線檢查")
+        return
+    found, extra = check_wiring.run(ROOT)
+    problems.extend(found)
+    notes.extend(extra)
+
+
 def main():
     check_project_settings()
     check_scenes()
     run_optional(check_indentation())
+    check_wiring()
 
     for note in notes:
         print(f"  {note}")
