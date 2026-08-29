@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from inspect_model import guess_standard_name, is_leaf_bone  # noqa: E402
@@ -48,6 +49,14 @@ def parse_args(argv):
     parser.add_argument("--map", type=Path, help="骨骼改名對照表 JSON；不給就自動推導")
     parser.add_argument("--tri-max", type=int, default=TRI_MAX, help=f"面數上限（預設 {TRI_MAX}）")
     parser.add_argument("--no-decimate", action="store_true", help="面數超標時只警告，不 decimate")
+    parser.add_argument("--target-height", type=float, default=0.0,
+                        help="把角色縮放到這個高度（公尺）。0 = 維持原尺寸。"
+                             "Meshy 的匯出單位不固定，量到的尺寸不合理時用這個修")
+    parser.add_argument("--texture-size", type=int, default=1024,
+                        help="貼圖邊長上限（預設 1024，0 表示不縮）")
+    parser.add_argument("--texture-format", default="AUTO", choices=["AUTO", "JPEG", "WEBP"],
+                        help="內嵌貼圖的編碼。AUTO 維持 PNG；WEBP 通常再小一半以上，"
+                             "但法線貼圖用有損格式會出現色塊")
     return parser.parse_args(argv)
 
 
@@ -135,50 +144,148 @@ def iter_fcurves(action):
                 yield from bag.fcurves
 
 
-def rename_bones(armature, meshes, mapping):
-    """改名骨骼。Blender 會連帶更新頂點群組與動作曲線，但不保證每個版本都做，
-    所以下面再明確補一次——已經改好的會被跳過。"""
+def spine_chain(armature):
+    """Hips 到 Neck 之間的骨骼，由下往上排序。
+
+    脊椎不能靠名稱判斷。Meshy 的 Spine / Spine01 / Spine02 會有兩個以上
+    對到同一個標準名，而且不同來源的編號方向還不一樣（有的由下往上、
+    有的相反）。位置是唯一可靠的依據：Hips 之上第一節就是 Spine，
+    第二節是 Chest，第三節是 UpperChest。
+    """
     bones = armature.data.bones
-    renamed, skipped = 0, []
+    hips = next((b for b in bones if guess_standard_name(b.name) == "Hips"), None)
+    neck = next((b for b in bones if guess_standard_name(b.name) == "Neck"), None)
+    if hips is None or neck is None:
+        return []
+    chain = []
+    cursor = neck.parent
+    while cursor is not None and cursor != hips:
+        chain.append(cursor)
+        cursor = cursor.parent
+    if cursor != hips:
+        return []  # Neck 不在 Hips 的子樹裡，結構不是預期的樣子
+    chain.reverse()
+    return chain
 
-    for old, new in mapping.items():
-        if old not in bones:
-            skipped.append(old)
-            continue
-        if new in bones and bones[new].name != bones[old].name:
-            print(f"! '{new}' 已存在，跳過 '{old}' 的改名")
-            skipped.append(old)
-            continue
-        bones[old].name = new
-        renamed += 1
 
-    for obj in meshes:
-        for old, new in mapping.items():
+def apply_renames(armature, meshes, pairs):
+    """分兩階段改名，先全部改成暫時名稱再改成目標名稱。
+
+    直接改名時，只要目標名稱已經被別的骨骼佔著就會失敗或被跳過，
+    留下半改名的骨架——那正是脊椎順序錯掉的原因，而且不會有任何錯誤訊息。
+    """
+    bones = armature.data.bones
+    staged = []
+    for index, (old, new) in enumerate(pairs):
+        if old == new or old not in bones:
+            continue
+        temporary = f"__trio_tmp_{index}"
+        bones[old].name = temporary
+        staged.append((old, temporary, new))
+
+    for _, temporary, new in staged:
+        bones[temporary].name = new
+
+    for old, _, new in staged:
+        for obj in meshes:
             group = obj.vertex_groups.get(old)
             if group and not obj.vertex_groups.get(new):
                 group.name = new
 
     for action in bpy.data.actions:
         for curve in iter_fcurves(action):
-            for old, new in mapping.items():
+            for old, _, new in staged:
                 token = f'pose.bones["{old}"]'
                 if token in curve.data_path:
                     curve.data_path = curve.data_path.replace(token, f'pose.bones["{new}"]')
+    return len(staged)
 
-    print(f"改名 {renamed} 根骨骼" + (f"（{len(skipped)} 根跳過：{', '.join(skipped)}）" if skipped else ""))
+
+def rename_bones(armature, meshes, mapping):
+    """改名骨骼。Blender 會連帶更新頂點群組與動作曲線，但不保證每個版本都做，
+    所以下面再明確補一次——已經改好的會被跳過。"""
+    # 脊椎依階層位置指定，覆蓋名稱猜測的結果。
+    spine_names = ["Spine", "Chest", "UpperChest"]
+    chain = spine_chain(armature)
+    if chain:
+        print(f"脊椎鏈（由下往上）：{' → '.join(b.name for b in chain)}")
+        if len(chain) > len(spine_names):
+            print(f"! 脊椎有 {len(chain)} 節，profile 只定義 {len(spine_names)} 節，多的維持原名")
+        for bone, name in zip(chain, spine_names):
+            mapping[bone.name] = name
+        for bone in chain[len(spine_names):]:
+            mapping.pop(bone.name, None)
+    else:
+        print("! 找不到 Hips→Neck 的脊椎鏈，脊椎維持名稱猜測的結果")
+
+    renamed = apply_renames(armature, meshes, list(mapping.items()))
+    print(f"改名 {renamed} 根骨骼")
     return renamed
 
 
-def apply_transforms(targets):
-    """套用 scale 與 rotation，不動 location——位移套用會把角色的原點搬走。"""
-    if not targets:
-        return
+def fmt(value):
+    """小數點後三位會把 0.0002 印成 0.000，看起來像量不到——
+    尺寸出問題時那正是最需要看清楚的數字，所以一律用有效位數。"""
+    return f"{value:.4g}"
+
+
+def measure(meshes):
+    """角色的世界空間尺寸。回傳 (最長邊, 三軸)。
+
+    直立兩足角色的最長邊就是身高。用最長邊而不是指定某一軸，
+    是因為不同來源的上方向不一樣（FBX 是 Y-up、Blender 是 Z-up、
+    有的匯出器還會多轉一次），指定軸很容易量錯。
+    """
+    corners = [obj.matrix_world @ Vector(c) for obj in meshes for c in obj.bound_box]
+    if not corners:
+        return 0.0, (0.0, 0.0, 0.0)
+    size = tuple(
+        max(c[i] for c in corners) - min(c[i] for c in corners)
+        for i in range(3)
+    )
+    return max(size), size
+
+
+def normalise_transforms(armature, meshes, target_height):
+    """套用 rotation 與 scale，並在指定 target_height 時把角色縮放到該高度。
+
+    Meshy 匯出的單位不固定（公尺、公分、任意值都遇過），而 FBX 的單位轉換
+    在匯入／套用／匯出三個環節各有一次機會出錯。與其猜來源用什麼單位，
+    不如量出實際尺寸再縮到要的高度——這是唯一不依賴任何慣例的做法。
+
+    不動 location：位移套用會把角色的原點搬走。
+    """
+    before, dims = measure(meshes)
+    print(f"角色尺寸：{fmt(dims[0])} x {fmt(dims[1])} x {fmt(dims[2])} 公尺"
+          f"（最長邊 {fmt(before)}）")
+
+    if target_height > 0.0:
+        if before <= 0.0:
+            print("! 量不到尺寸，跳過高度正規化")
+        else:
+            factor = target_height / before
+            armature.scale = armature.scale * factor
+            print(f"高度正規化：{fmt(before)} → {fmt(target_height)}（係數 {fmt(factor)}）")
+
     bpy.ops.object.select_all(action="DESELECT")
+    targets = [armature] + meshes
     for obj in targets:
         obj.select_set(True)
-    bpy.context.view_layer.objects.active = targets[0]
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-    print(f"已套用 {len(targets)} 個物件的 rotation 與 scale")
+    bpy.context.view_layer.objects.active = armature
+    result = bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    print(f"套用 rotation 與 scale：{len(targets)} 個物件，結果 {'/'.join(result)}")
+
+    leftover = [o for o in targets if any(abs(v - 1.0) > 1e-4 for v in o.scale)]
+    for obj in leftover:
+        print(f"! {obj.name} 的 scale 仍是 {tuple(round(v, 4) for v in obj.scale)}，未能套用")
+
+    after, dims = measure(meshes)
+    print(f"套用後尺寸：{fmt(dims[0])} x {fmt(dims[1])} x {fmt(dims[2])} 公尺"
+          f"（最長邊 {fmt(after)}）")
+    if after < 0.1 or after > 100.0:
+        print(f"! 最長邊 {fmt(after)} 公尺明顯不合理。Meshy 的匯出單位不固定，"
+              f"用 --target-height 指定身高即可，例如 --target-height 1.8")
+    return after
 
 
 def triangle_count(meshes):
@@ -203,11 +310,32 @@ def decimate_to(meshes, limit):
     return triangle_count(meshes)
 
 
-def export_glb(path):
+def resize_textures(limit):
+    """把過大的貼圖縮到上限之內。
+
+    Meshy 預設輸出 4K，單張就 20 MB 以上。本作是低多邊形卡通風、色塊乾淨
+    （docs/09），1024 綽綽有餘；而且分屏要渲染兩次，記憶體頻寬是實際成本。
+    不縮的話，內嵌貼圖會讓一隻角色的 GLB 就有 40 MB。
+    """
+    resized = []
+    for image in bpy.data.images:
+        width, height = image.size
+        if max(width, height) <= limit or width == 0:
+            continue
+        factor = limit / max(width, height)
+        image.scale(max(1, int(width * factor)), max(1, int(height * factor)))
+        resized.append(f"{image.name} {width}x{height} → {image.size[0]}x{image.size[1]}")
+    for line in resized:
+        print(f"貼圖縮圖：{line}")
+    return len(resized)
+
+
+def export_glb(path, image_format="AUTO"):
     """匯出參數依版本過濾，避免在不同 Blender 上因為多一個參數就整個失敗。"""
     wanted = {
         "filepath": str(path),
         "export_format": "GLB",
+        "export_image_format": image_format,
         "export_apply": True,
         "export_animations": True,
         "export_skins": True,
@@ -250,13 +378,16 @@ def main():
     if leaves:
         print(f"葉端骨骼 {len(leaves)} 根（FBX 匯出常見，無害）")
 
-    apply_transforms([armature] + meshes)
+    normalise_transforms(armature, meshes, args.target_height)
 
     final_tris = triangle_count(meshes) if args.no_decimate else decimate_to(meshes, args.tri_max)
     if args.no_decimate and final_tris > args.tri_max:
         print(f"! 面數 {final_tris:,} 仍超過上限 {args.tri_max:,}（--no-decimate）")
 
-    export_glb(args.output)
+    if args.texture_size > 0:
+        resize_textures(args.texture_size)
+
+    export_glb(args.output, args.texture_format)
     print(f"\n已輸出 {args.output}（{final_tris:,} 三角面）")
     print(f"驗貨：python3 tools/inspect_model.py {args.output}")
 

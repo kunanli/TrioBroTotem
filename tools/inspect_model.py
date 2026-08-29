@@ -151,6 +151,57 @@ def triangle_count(gltf):
     return total
 
 
+def _compose(node):
+    """節點的區域 4x4 矩陣（列主序的巢狀 list）。"""
+    if "matrix" in node:
+        m = node["matrix"]  # glTF 是行主序
+        return [[m[0], m[4], m[8], m[12]],
+                [m[1], m[5], m[9], m[13]],
+                [m[2], m[6], m[10], m[14]],
+                [m[3], m[7], m[11], m[15]]]
+    tx, ty, tz = node.get("translation", (0.0, 0.0, 0.0))
+    x, y, z, w = node.get("rotation", (0.0, 0.0, 0.0, 1.0))
+    sx, sy, sz = node.get("scale", (1.0, 1.0, 1.0))
+    rot = [
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ]
+    scale = (sx, sy, sz)
+    return [[rot[r][c] * scale[c] for c in range(3)] + [(tx, ty, tz)[r]] for r in range(3)] + \
+           [[0.0, 0.0, 0.0, 1.0]]
+
+
+def _multiply(a, b):
+    return [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
+
+
+def skeleton_extent(gltf, joints, parents):
+    """骨架在世界空間的尺寸。
+
+    只看根節點的 scale 會誤判：Blender 的 glTF 匯出器慣例是把骨骼寫成
+    公分等級的位移，再用根節點 scale 0.01 換算回公尺——那是正常的，
+    不是待修的問題。真正要驗的是兩者相乘之後的實際尺寸。
+    """
+    nodes = gltf.get("nodes", [])
+    cache = {}
+
+    def world(index):
+        if index in cache:
+            return cache[index]
+        local = _compose(nodes[index])
+        parent = parents.get(index)
+        matrix = local if parent is None else _multiply(world(parent), local)
+        cache[index] = matrix
+        return matrix
+
+    points = [(world(j)[0][3], world(j)[1][3], world(j)[2][3]) for j in joints]
+    if not points:
+        return 0.0, (0.0, 0.0, 0.0)
+    size = tuple(max(p[i] for p in points) - min(p[i] for p in points) for i in range(3))
+    return max(size), size
+
+
 def build_parents(gltf):
     parents = {}
     for index, node in enumerate(gltf.get("nodes", [])):
@@ -243,7 +294,7 @@ def inspect_one(model_path, map_path):
             raw = nodes[joint].get("name", f"<node {joint}>")
             guess = guess_standard_name(raw)
             if guess is None:
-                mark = "  ← 不在 profile 內"
+                mark = "  ← 葉端" if is_leaf_bone(raw) else "  ← 不在 profile 內"
             elif guess == raw:
                 mark = ""
             else:
@@ -294,12 +345,15 @@ def inspect_one(model_path, map_path):
     if not animations:
         warnings.append("沒有內嵌動畫。骨架若對得上 profile，可以用外部人形動畫庫 retarget（TD-07 選這套命名就是為了這個）。")
 
-    for index, node in enumerate(nodes):
-        if index in parents:
-            continue
-        scale = node.get("scale")
-        if scale and any(abs(s - 1.0) > 1e-4 for s in scale):
-            warnings.append(f"根節點 '{node.get('name', index)}' 帶著 scale {scale}。匯入前要在 Blender 套用，否則 ragdoll 的碰撞體尺寸會全錯。")
+    if joints:
+        height, size = skeleton_extent(gltf, joints, parents)
+        print(f"\n## 尺寸\n骨架 {size[0]:.4g} x {size[1]:.4g} x {size[2]:.4g} 公尺"
+              f"（最長邊 {height:.4g}）")
+        if height < 0.1 or height > 100.0:
+            problems.append(
+                f"骨架最長邊 {height:.4g} 公尺，明顯不合理。Meshy 的匯出單位不固定，"
+                f"正規化時加 --target-height 指定身高即可。"
+            )
 
     print("\n" + "=" * 60)
     if problems:
