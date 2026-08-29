@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""檢查 Meshy（或任何來源）匯出的 glTF/GLB，看它能不能進 TrioBroTotem 的管線。
+
+只用標準函式庫，不需要 Blender、不需要 Godot、不需要 pip install。
+
+    python3 tools/inspect_model.py assets/source/pig.glb
+    python3 tools/inspect_model.py assets/source/pig.glb --map bone_map.json
+
+檢查依據：
+  docs/12-art-pipeline.md   資產規格（T-pose、5,000-15,000 三角面）
+  docs/13-tech-decisions.md TD-07（骨骼命名採 SkeletonProfileHumanoid）
+"""
+
+import argparse
+import json
+import re
+import struct
+import sys
+from pathlib import Path
+
+# --- 規格 -------------------------------------------------------------------
+
+TRI_MIN, TRI_MAX = 5_000, 15_000
+
+# Godot SkeletonProfileHumanoid 的核心骨骼。手指與眼睛是選配，
+# 缺了不擋 retarget，所以不列進必要清單。
+REQUIRED_BONES = [
+    "Hips", "Spine", "Chest", "Neck", "Head",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+]
+OPTIONAL_BONES = [
+    "Root", "UpperChest", "LeftShoulder", "RightShoulder",
+    "LeftToes", "RightToes", "LeftEye", "RightEye", "Jaw",
+]
+
+# 來源命名 -> 標準名。key 已經過 _normalise()，所以不必列大小寫與分隔符變體。
+ALIASES = {
+    "hips": "Hips", "hip": "Hips", "pelvis": "Hips", "bip01pelvis": "Hips",
+    "spine": "Spine", "spine01": "Spine",
+    "chest": "Chest", "spine02": "Chest", "spine1": "Chest",
+    "upperchest": "UpperChest", "spine03": "UpperChest", "spine2": "UpperChest",
+    "neck": "Neck", "neck01": "Neck",
+    "head": "Head",
+    "jaw": "Jaw",
+    "root": "Root", "armature": "Root", "reference": "Root",
+}
+# 有左右之分的骨骼：正規化後會被拆成 (側邊, 部位)
+SIDED_ALIASES = {
+    "shoulder": "Shoulder", "clavicle": "Shoulder",
+    "arm": "UpperArm", "upperarm": "UpperArm", "armupper": "UpperArm",
+    "forearm": "LowerArm", "lowerarm": "LowerArm", "armlower": "LowerArm",
+    "hand": "Hand",
+    "upleg": "UpperLeg", "upperleg": "UpperLeg", "thigh": "UpperLeg",
+    "lowerleg": "LowerLeg", "calf": "LowerLeg", "shin": "LowerLeg", "leg": "LowerLeg",
+    "foot": "Foot", "ankle": "Foot",
+    "toebase": "Toes", "toe": "Toes", "ball": "Toes",
+    "eye": "Eye",
+}
+FINGERS = {"thumb": "Thumb", "index": "Index", "middle": "Middle", "ring": "Ring", "pinky": "Little", "little": "Little"}
+
+
+def _normalise(name):
+    """mixamorig:LeftForeArm -> ('left', 'forearm')；thigh_R -> ('right', 'thigh')"""
+    n = name.split(":")[-1]
+    n = re.sub(r"^(mixamorig|bip01|bone|def|org|ctrl)[-_.]?", "", n, flags=re.I)
+    side = None
+    # 尾綴形式：_L / .R / _left
+    m = re.search(r"[-_. ](l|r|left|right)$", n, flags=re.I)
+    if m:
+        side = "left" if m.group(1).lower()[0] == "l" else "right"
+        n = n[: m.start()]
+    else:
+        # 前綴形式：LeftArm / R_Hand
+        m = re.match(r"^(left|right|l|r)[-_. ]?(?=[A-Z0-9])", n, flags=re.I)
+        if m:
+            side = "left" if m.group(1).lower()[0] == "l" else "right"
+            n = n[m.end():]
+    return side, re.sub(r"[^a-z0-9]", "", n.lower())
+
+
+def guess_standard_name(name):
+    """回傳建議的標準骨骼名，猜不出來回傳 None。"""
+    side, core = _normalise(name)
+    if core in ALIASES and side is None:
+        return ALIASES[core]
+    if side:
+        prefix = "Left" if side == "left" else "Right"
+        if core in SIDED_ALIASES:
+            return prefix + SIDED_ALIASES[core]
+        finger_core = core[4:] if core.startswith("hand") else core
+        for key, part in FINGERS.items():
+            if finger_core.startswith(key):
+                tail = finger_core[len(key):]
+                segment = {"1": "Proximal", "2": "Intermediate", "3": "Distal", "4": "Distal", "": "Proximal"}.get(tail)
+                if segment:
+                    if part == "Thumb":
+                        segment = {"Proximal": "Metacarpal", "Intermediate": "Proximal", "Distal": "Distal"}[segment]
+                    return f"{prefix}{part}{segment}"
+    return None
+
+
+# --- glTF / GLB 讀取 ---------------------------------------------------------
+
+def load_gltf(path):
+    data = path.read_bytes()
+    if data[:4] == b"glTF":
+        version, _length = struct.unpack_from("<II", data, 4)
+        if version != 2:
+            raise ValueError(f"只支援 glTF 2.0，這個檔是版本 {version}")
+        offset, gltf = 12, None
+        while offset + 8 <= len(data):
+            chunk_len, chunk_type = struct.unpack_from("<I4s", data, offset)
+            body = data[offset + 8: offset + 8 + chunk_len]
+            if chunk_type == b"JSON":
+                gltf = json.loads(body.decode("utf-8"))
+            offset += 8 + chunk_len + (-chunk_len % 4)
+        if gltf is None:
+            raise ValueError("GLB 裡找不到 JSON chunk")
+        return gltf
+    return json.loads(data.decode("utf-8"))
+
+
+def triangle_count(gltf):
+    total = 0
+    accessors = gltf.get("accessors", [])
+    for mesh in gltf.get("meshes", []):
+        for prim in mesh.get("primitives", []):
+            if prim.get("mode", 4) != 4:
+                continue
+            if "indices" in prim:
+                total += accessors[prim["indices"]]["count"] // 3
+            elif "POSITION" in prim.get("attributes", {}):
+                total += accessors[prim["attributes"]["POSITION"]]["count"] // 3
+    return total
+
+
+def build_parents(gltf):
+    parents = {}
+    for index, node in enumerate(gltf.get("nodes", [])):
+        for child in node.get("children", []):
+            parents[child] = index
+    return parents
+
+
+def animation_length(gltf, anim):
+    longest = 0.0
+    accessors = gltf.get("accessors", [])
+    for sampler in anim.get("samplers", []):
+        acc = accessors[sampler["input"]]
+        if "max" in acc and acc["max"]:
+            longest = max(longest, float(acc["max"][0]))
+    return longest
+
+
+# --- 報告 -------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="檢查 glTF/GLB 是否符合 TrioBroTotem 的資產規格")
+    parser.add_argument("model", type=Path)
+    parser.add_argument("--map", type=Path, help="把猜到的骨骼改名對照表寫成 JSON")
+    args = parser.parse_args()
+
+    if not args.model.exists():
+        sys.exit(f"找不到檔案：{args.model}")
+
+    gltf = load_gltf(args.model)
+    nodes = gltf.get("nodes", [])
+    parents = build_parents(gltf)
+    problems, warnings = [], []
+
+    print(f"# {args.model.name}（{args.model.stat().st_size / 1e6:.1f} MB）")
+    generator = gltf.get("asset", {}).get("generator", "未標示")
+    print(f"產生器：{generator}")
+
+    tris = triangle_count(gltf)
+    print(f"\n## 面數\n{tris:,} 三角面（規格 {TRI_MIN:,}–{TRI_MAX:,}）")
+    if tris > TRI_MAX:
+        problems.append(f"面數 {tris:,} 超過上限 {TRI_MAX:,}，需要 decimate。分屏要渲染兩次，這個上限不是建議值。")
+    elif tris < TRI_MIN:
+        warnings.append(f"面數 {tris:,} 低於下限 {TRI_MIN:,}，關節處可能沒有足夠的 edge loop，變形會壓扁。")
+
+    skins = gltf.get("skins", [])
+    print(f"\n## 骨架\n{len(skins)} 個 skin")
+    if not skins:
+        problems.append("這個檔案沒有 skin——它是靜態模型，還沒綁骨。要先在 Meshy 跑 rigging。")
+        joints = []
+    else:
+        if len(skins) > 1:
+            warnings.append(f"有 {len(skins)} 個 skin，共用骨架的前提是只有一個。")
+        joints = skins[0].get("joints", [])
+        print(f"{len(joints)} 根骨骼\n")
+        joint_set = set(joints)
+
+        def show(joint, depth):
+            raw = nodes[joint].get("name", f"<node {joint}>")
+            guess = guess_standard_name(raw)
+            if guess is None:
+                mark = "  ← 猜不出來，要手動指定"
+            elif guess == raw:
+                mark = ""
+            else:
+                mark = f"  -> {guess}"
+            print(f"{'  ' * depth}{raw}{mark}")
+            for child in nodes[joint].get("children", []):
+                if child in joint_set:
+                    show(child, depth + 1)
+
+        for joint in joints:
+            if parents.get(joint) not in joint_set:
+                show(joint, 0)
+
+    mapping = {}
+    for joint in joints:
+        raw = nodes[joint].get("name", "")
+        guess = guess_standard_name(raw)
+        if guess and guess != raw:
+            mapping[raw] = guess
+
+    mapped = set(mapping.values()) | {nodes[j].get("name", "") for j in joints}
+    missing = [b for b in REQUIRED_BONES if b not in mapped]
+    print("\n## 對 SkeletonProfileHumanoid 的覆蓋率（TD-07）")
+    print(f"必要骨骼 {len(REQUIRED_BONES) - len(missing)}/{len(REQUIRED_BONES)}")
+    if missing and joints:
+        problems.append("對不上的必要骨骼：" + "、".join(missing) + "。缺這些就無法 retarget 現成人形動畫。")
+    optional_hit = [b for b in OPTIONAL_BONES if b in mapped]
+    if optional_hit:
+        print("選配骨骼：" + "、".join(optional_hit))
+
+    unmapped = [nodes[j].get("name", "") for j in joints
+                if guess_standard_name(nodes[j].get("name", "")) is None
+                and nodes[j].get("name", "") not in REQUIRED_BONES + OPTIONAL_BONES]
+    if unmapped:
+        print(f"\n## 角色專屬骨鏈（{len(unmapped)} 根）")
+        print("、".join(unmapped))
+        print("這些不參與 retarget，掛在 profile 之外由角色專屬動畫驅動（例如長頸鹿的脖子）。")
+
+    animations = gltf.get("animations", [])
+    print(f"\n## 動畫\n{len(animations)} 支")
+    for anim in animations:
+        print(f"  {anim.get('name', '<未命名>')} — {animation_length(gltf, anim):.2f}s，{len(anim.get('channels', []))} 條軌")
+    if not animations:
+        warnings.append("沒有內嵌動畫。骨架若對得上 profile，可以用外部人形動畫庫 retarget（TD-07 選這套命名就是為了這個）。")
+
+    for index, node in enumerate(nodes):
+        if index in parents:
+            continue
+        scale = node.get("scale")
+        if scale and any(abs(s - 1.0) > 1e-4 for s in scale):
+            warnings.append(f"根節點 '{node.get('name', index)}' 帶著 scale {scale}。匯入前要在 Blender 套用，否則 ragdoll 的碰撞體尺寸會全錯。")
+
+    print("\n" + "=" * 60)
+    if problems:
+        print(f"\n## 擋住管線的問題（{len(problems)}）")
+        for i, p in enumerate(problems, 1):
+            print(f"{i}. {p}")
+    if warnings:
+        print(f"\n## 要注意的（{len(warnings)}）")
+        for i, w in enumerate(warnings, 1):
+            print(f"{i}. {w}")
+    if not problems and not warnings:
+        print("\n沒有發現問題。")
+
+    if args.map:
+        args.map.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n改名對照表已寫入 {args.map}（{len(mapping)} 項）")
+
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

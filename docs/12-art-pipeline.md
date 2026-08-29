@@ -15,6 +15,8 @@
 
 **命名規範已定案**：採用 Godot 的 `SkeletonProfileHumanoid`，不自創。好處是免費打開現成人形動畫庫可供 retarget。完整說明見〈[技術決策](13-tech-decisions.md)〉TD-07。
 
+**驗貨工具**：`python3 tools/inspect_model.py <模型.glb>` 會列出骨架階層、面數、動畫清單，並比對本文的資產規格與 TD-07 的命名規範，指出哪些骨骼對不上。加 `--map bone_map.json` 可輸出改名對照表給 Blender 腳本使用。只需要 Python，不需要 Blender 或 Godot。
+
 ### 資產規格
 
 | 項目 | 規格 |
