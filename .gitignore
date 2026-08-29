@@ -14,23 +14,26 @@ export_presets.cfg
 *.dmg
 *.zip
 
-# 原始模型匯出不進版控（見 assets/source/README.md）
+# 模型與貼圖的二進位不進版控（見 assets/source/README.md）
 #
 # 理由：Meshy 的原始匯出隨時可以重新下載，而且每次重生成都是新的一份。
 # 它們又大（單一角色連貼圖 80 MB）又不是最終資產。版控只放正規化後、
-# 真正進遊戲的檔案——那些每隻只有幾 MB。
+# 真正進遊戲的檔案——那些放在 trio-project/ 底下，每隻只有幾 MB。
 #
-# 只擋二進位，README 與資料夾結構仍然追蹤。
-assets/source/**/*.fbx
-assets/source/**/*.glb
-assets/source/**/*.gltf
-assets/source/**/*.obj
-assets/source/**/*.blend
-assets/source/**/*.png
-assets/source/**/*.jpg
-assets/source/**/*.jpeg
-assets/source/**/*.tga
-assets/source/**/*.exr
+# 不限定 assets/source/：角色資料夾放在 assets/ 哪一層都會被擋到。
+assets/**/*.fbx
+assets/**/*.glb
+assets/**/*.gltf
+assets/**/*.obj
+assets/**/*.blend
+assets/**/*.png
+assets/**/*.jpg
+assets/**/*.jpeg
+assets/**/*.tga
+assets/**/*.exr
+
+# 但參考資料要留著（關卡草圖、流程圖）
+!assets/reference/**
 
 # 美術暫存
 *.blend1

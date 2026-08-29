@@ -79,15 +79,15 @@ func get_move_vector(device_id: int) -> Vector2:
 	return raw if raw.length() > STICK_DEADZONE else Vector2.ZERO
 
 
-## 鏡頭轉向輸入。手把是右搖桿（docs/06），鍵鼠是按住滑鼠右鍵拖曳。
-##
-## 用「按住右鍵」而不是鎖定滑鼠，是因為 M0 要在同一台機器上開三個視窗測——
-## 鎖定滑鼠會讓你沒辦法點到另一個視窗。
-func get_look_delta(device_id: int) -> float:
+## 手把的鏡頭輸入（右搖桿，見 docs/06）。滑鼠走 _unhandled_input，不在這裡。
+func get_look_delta(device_id: int) -> Vector2:
 	if device_id < 0:
-		return 0.0
-	var raw := Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X)
-	return raw if absf(raw) > STICK_DEADZONE else 0.0
+		return Vector2.ZERO
+	var raw := Vector2(
+		Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+		Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+	)
+	return raw if raw.length() > STICK_DEADZONE else Vector2.ZERO
 
 
 func is_pressed(device_id: int, action: StringName) -> bool:

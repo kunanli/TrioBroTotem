@@ -46,16 +46,23 @@ const STRUGGLE_TO_BREAK := 2.4
 ## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
 const CARRY_SPEED_PENALTY := 0.7
 
-## 鏡頭：距離、高度、看向角色身上多高的點。
+## --- 鏡頭 ---
+## 鏡頭繞著角色身上 CAMERA_TARGET_HEIGHT 的那個點轉，半徑固定。
 const CAMERA_DISTANCE := 6.5
-const CAMERA_HEIGHT := 3.0
 const CAMERA_TARGET_HEIGHT := 1.2
 
-## 鏡頭追上角色所需的時間。0 = 硬綁在身上（會很跳），太大會拖泥帶水。
-const CAMERA_FOLLOW_TIME := 0.10
+## 水平與垂直分開追隨，垂直**刻意慢很多**。
+## 用同一個值的話，跳躍與走斜坡時鏡頭會跟著上下彈——那是最明顯的暈眩來源。
+const CAMERA_FOLLOW_TIME := 0.09
+const CAMERA_VERTICAL_TIME := 0.28
 
-const MOUSE_SENSITIVITY := 0.005
-const STICK_LOOK_SPEED := 2.5
+## 仰角範圍（弧度）。下限不設負太多，否則鏡頭會鑽到地板下面。
+const CAMERA_PITCH_MIN := -0.10
+const CAMERA_PITCH_MAX := 1.15
+const CAMERA_PITCH_DEFAULT := 0.42
+
+const MOUSE_SENSITIVITY := 0.0032
+const STICK_LOOK_SPEED := 2.6
 
 const SLOT_COLORS := [
 	Color(0.90, 0.42, 0.32),  # 0 泥土色
@@ -85,8 +92,10 @@ var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 
 var _throw_charge: float = 0.0
 var _struggle: float = 0.0
 
-## 鏡頭的水平角度。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
+## 鏡頭角度與追隨中的注視點。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
 var _camera_yaw: float = 0.0
+var _camera_pitch: float = CAMERA_PITCH_DEFAULT
+var _camera_anchor: Vector3 = Vector3.ZERO
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
@@ -120,8 +129,8 @@ func _ready() -> void:
 	# 鏡頭脫離角色的座標系，改成自己平滑追上去。
 	# 硬綁在角色身上時，角色每個物理幀的位移會原封不動變成鏡頭的抖動。
 	_camera.top_level = true
-	_camera.global_position = _camera_goal()
-	_camera.look_at(_camera_focus(), Vector3.UP)
+	_camera_anchor = _focus_target()
+	_place_camera()
 
 	if is_multiplayer_authority():
 		net_position = global_position
@@ -147,15 +156,25 @@ func _setup_synchronizer() -> void:
 	add_child(sync)
 
 
-## 鏡頭看的目標點：角色身上稍高的位置，不是腳底。
-func _camera_focus() -> Vector3:
+## 鏡頭要對準的點：角色身上稍高的位置，不是腳底。
+func _focus_target() -> Vector3:
 	return global_position + Vector3.UP * CAMERA_TARGET_HEIGHT
 
 
-## 鏡頭應該在的位置：以 _camera_yaw 繞著角色轉。
-func _camera_goal() -> Vector3:
-	var offset := Basis(Vector3.UP, _camera_yaw) * Vector3(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE)
-	return _camera_focus() + offset
+## 鏡頭相對於注視點的位移。
+func _orbit_offset() -> Vector3:
+	var arm := Vector3(0.0, sin(_camera_pitch), cos(_camera_pitch)) * CAMERA_DISTANCE
+	return Basis(Vector3.UP, _camera_yaw) * arm
+
+
+## 位置與注視點一起由 _camera_anchor 推導，兩者永遠剛性綁在一起。
+##
+## 之前的做法是位置做平滑、注視點直接用角色當下位置——角色橫move 時，
+## 落後的鏡頭為了盯住角色會額外轉一個角度，整個畫面跟著晃。
+## 改成只有注視點在平滑，鏡頭就只有位移延遲，沒有轉動晃動。
+func _place_camera() -> void:
+	_camera.global_position = _camera_anchor + _orbit_offset()
+	_camera.look_at(_camera_anchor, Vector3.UP)
 
 
 ## 鏡頭的水平基底。移動輸入要換算到這個座標系——
@@ -164,25 +183,51 @@ func _camera_basis() -> Basis:
 	return Basis(Vector3.UP, _camera_yaw)
 
 
-func _input(event: InputEvent) -> void:
+## 用 _unhandled_input 而不是 _input：UI 已經處理掉的點擊不會流到這裡，
+## 所以點大廳按鈕不會順便鎖住滑鼠。
+func _unhandled_input(event: InputEvent) -> void:
 	if not _camera.current:
 		return
+
+	if event.is_action_pressed(&"ui_cancel"):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
+
+	var click := event as InputEventMouseButton
+	if click != null and click.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		# 點進畫面就鎖滑鼠，Esc 放開。M0 要在同一台機器上開三個視窗，
+		# 所以一定要留一個放開的方式。
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
+
 	var motion := event as InputEventMouseMotion
 	if motion == null:
 		return
-	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		return
-	_camera_yaw -= motion.relative.x * MOUSE_SENSITIVITY
+	var looking := (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
+	if looking:
+		_turn_camera(-motion.relative.x * MOUSE_SENSITIVITY, motion.relative.y * MOUSE_SENSITIVITY)
+
+
+func _turn_camera(yaw_delta: float, pitch_delta: float) -> void:
+	_camera_yaw += yaw_delta
+	_camera_pitch = clampf(_camera_pitch + pitch_delta, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX)
 
 
 func _process(delta: float) -> void:
 	if not _camera.current:
 		return
-	_camera_yaw -= GameInput.get_look_delta(device_id) * STICK_LOOK_SPEED * delta
+	var stick := GameInput.get_look_delta(device_id)
+	_turn_camera(-stick.x * STICK_LOOK_SPEED * delta, stick.y * STICK_LOOK_SPEED * delta)
+
 	# 指數平滑：不受影格率影響，60 與 144 fps 的追隨速度一致。
-	var t := 1.0 - exp(-delta / CAMERA_FOLLOW_TIME)
-	_camera.global_position = _camera.global_position.lerp(_camera_goal(), t)
-	_camera.look_at(_camera_focus(), Vector3.UP)
+	var target := _focus_target()
+	var horizontal := 1.0 - exp(-delta / CAMERA_FOLLOW_TIME)
+	var vertical := 1.0 - exp(-delta / CAMERA_VERTICAL_TIME)
+	_camera_anchor.x = lerpf(_camera_anchor.x, target.x, horizontal)
+	_camera_anchor.z = lerpf(_camera_anchor.z, target.z, horizontal)
+	_camera_anchor.y = lerpf(_camera_anchor.y, target.y, vertical)
+	_place_camera()
 
 
 ## 面向的基底。投擲方向讀這個，不是讀 CharacterBody3D 的 transform——

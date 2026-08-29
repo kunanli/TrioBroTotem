@@ -55,8 +55,9 @@ README 與資料夾結構仍然追蹤。
 
 ### 一次性清理（已經進過版控的話）
 
-git 的歷史是永久的，所以光是刪檔案不會讓 repo 變小。第一批模型
-（archer / knight / monster，約 194 MB）已經進過歷史，要改寫才拿得掉。
+git 的歷史是永久的，所以光是刪檔案不會讓 repo 變小。目前歷史裡累積了
+兩批模型（第一批 archer/knight/monster，第二批 Cat_Archer/Frog_Mage/Pig_Warrior），
+**repo 已經 395 MB**，要改寫才拿得掉。
 
 **在本機跑，不要在別的地方跑。** 跑完之後你的模型檔會留在硬碟上——
 它們變成「未追蹤且被忽略」的檔案，不會被刪。
@@ -67,8 +68,8 @@ git pull
 pip install git-filter-repo
 
 git filter-repo --force --invert-paths ^
-    --path-glob "assets/source/*.fbx" ^
-    --path-glob "assets/source/*.png"
+    --path-glob "assets/*.fbx" ^
+    --path-glob "assets/*.png"
 
 git remote add origin https://github.com/kunanli/TrioBroTotem
 git push --force origin main
@@ -85,7 +86,12 @@ git rev-list --objects --all | findstr ".fbx"
 git count-objects -vH
 ```
 
-第一行應該沒有輸出。第二行的 `size-pack` 應該從約 190 MB 掉到 1 MB 以下。
+第一行應該沒有輸出。第二行的 `size-pack` 應該從約 390 MB 掉到 1 MB 以下。
+
+> `--path-glob "assets/*.png"` 的 `*` 會跨越 `/`，所以兩批模型不管放在
+> `assets/source/` 還是 `assets/<角色>/` 都會被清掉。`assets/reference/`
+> 目前只有 `.jpg` 與 `.drawio`，不受影響——但之後若在那裡放 PNG，
+> 記得把它從清理範圍排除。
 GitHub 那邊要等它自己 gc，但新的 clone 會馬上變小。
 
 **如果你有第二份 clone 或任何 CI，它們會壞掉**，要重新 clone。
