@@ -94,9 +94,22 @@ def main():
     command = [blender, "--background", "--python", str(script), "--", *args.rest]
     print(f"Blender：{blender}\n")
 
-    result = subprocess.run(command, capture_output=not args.raw, text=True)
+    # 子行程的輸出一律當 UTF-8 讀。Windows 預設會用系統編碼（cp1252）解碼，
+    # 而管線的腳本印的是中文——一撞到中文位元組就 UnicodeDecodeError，
+    # 接著 stdout 變成 None，錯誤訊息會離真正的原因非常遠。
+    # PYTHONIOENCODING 讓 Blender 內嵌的 Python 也用 UTF-8 寫出。
+    environment = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run(
+        command,
+        capture_output=not args.raw,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=environment,
+    )
     if not args.raw:
-        for line in (result.stdout + result.stderr).split("\n"):
+        output = (result.stdout or "") + (result.stderr or "")
+        for line in output.split("\n"):
             if line.strip() and not NOISE.match(line):
                 print(line)
     return result.returncode

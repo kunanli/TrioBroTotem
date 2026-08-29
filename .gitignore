@@ -45,6 +45,10 @@ assets/**/*.exr
 Thumbs.db
 desktop.ini
 
+# Python
+__pycache__/
+*.pyc
+
 # 編輯器
 .vscode/
 .idea/
