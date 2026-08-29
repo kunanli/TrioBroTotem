@@ -24,6 +24,25 @@
 
 ---
 
+## 取得專案
+
+```
+git clone https://github.com/kunanli/TrioBroTotem.git
+cd TrioBroTotem
+```
+
+檢查專案有沒有明顯壞掉（不需要 Godot）：
+
+```
+pip install "gdtoolkit==4.*" godot-parser
+python tools/check_project.py
+```
+
+> Windows 的 CMD 沒有 `#` 註解，指令後面不要加說明文字。
+> 指令一律用 `python`；PowerShell 與 CMD 都吃 `/` 當路徑分隔。
+
+---
+
 ## 文件索引
 
 ### 設計
