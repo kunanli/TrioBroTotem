@@ -156,13 +156,50 @@ def run_optional(scripts):
     notes.append("godot-parser：場景全部解析成功")
 
 
+def find_godot():
+    """找 Godot 執行檔。Godot 通常是一個獨立的 exe，很少在 PATH 上。"""
+    import glob
+    import os
+
+    direct = os.environ.get("GODOT")
+    if direct and Path(direct).is_file():
+        return direct
+    for name in ("godot", "godot4", "Godot"):
+        found = shutil.which(name)
+        if found:
+            return found
+
+    patterns = []
+    if sys.platform == "win32":
+        home = os.environ.get("USERPROFILE", "")
+        patterns = [
+            "C:/Program Files/Godot*/*.exe",
+            "C:/Program Files (x86)/Steam/steamapps/common/Godot Engine/*.exe",
+            f"{home}/AppData/Local/Programs/Godot*/*.exe",
+            f"{home}/AppData/Local/Godot*/*.exe",
+        ]
+    elif sys.platform == "darwin":
+        patterns = ["/Applications/Godot.app/Contents/MacOS/Godot"]
+    else:
+        patterns = ["/usr/local/bin/godot*", "/opt/godot*/godot*"]
+
+    matches = []
+    for pattern in patterns:
+        matches += [m for m in glob.glob(pattern) if Path(m).is_file()]
+    if not matches:
+        return None
+    # 多版本並存時取檔名排序最大的，通常就是最新版。
+    return sorted(matches)[-1]
+
+
 def check_with_godot():
     """用 Godot 自己匯入一次專案。這是唯一抓得到型別錯誤的檢查。"""
     import os
 
-    godot = os.environ.get("GODOT") or shutil.which("godot") or shutil.which("godot4")
+    godot = find_godot()
     if not godot:
-        notes.append("找不到 Godot 執行檔，跳過引擎編譯檢查（設定 GODOT 環境變數即可啟用）")
+        notes.append("找不到 Godot 執行檔，跳過引擎編譯檢查"
+                     "（設定 GODOT 環境變數指到 .exe 即可啟用）")
         return
 
     # --import 會匯入所有資源並結束，順便編譯每一支腳本。

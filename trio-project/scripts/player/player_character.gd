@@ -47,9 +47,11 @@ const STRUGGLE_TO_BREAK := 2.4
 const CARRY_SPEED_PENALTY := 0.7
 
 ## --- 鏡頭 ---
-## 鏡頭繞著角色身上 CAMERA_TARGET_HEIGHT 的那個點轉，半徑固定。
+## 鏡頭繞著角色身上某個比例高度的點轉，半徑固定。
 const CAMERA_DISTANCE := 6.5
-const CAMERA_TARGET_HEIGHT := 1.2
+## 注視點取角色身高的幾成。用比例不用絕對值——三隻身高差 1.4 到 1.7 公尺，
+## 固定值會讓矮的那隻被鏡頭俯視、高的那隻被切到頭。
+const CAMERA_TARGET_RATIO := 0.7
 
 ## 水平與垂直分開追隨，垂直**刻意慢很多**。
 ## 用同一個值的話，跳躍與走斜坡時鏡頭會跟著上下彈——那是最明顯的暈眩來源。

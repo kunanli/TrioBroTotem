@@ -33,6 +33,14 @@ NODE_BUILTINS = {
 }
 
 
+## Godot 的全域常數。前綴涵蓋大部分，少數單獨列出。
+GODOT_PREFIXES = (
+    "KEY_", "JOY_", "MOUSE_", "PROPERTY_", "ERR_", "TYPE_", "METHOD_",
+    "NOTIFICATION_", "CORNER_", "SIDE_", "HORIZONTAL_", "VERTICAL_", "OP_",
+)
+GODOT_GLOBALS = {"INF", "NAN", "PI", "TAU", "OK", "FAILED", "TRUE", "FALSE", "SIZE"}
+
+
 def parse_scene(path):
     """回傳 {節點完整路徑: {'type':…, 'script':…}}，根節點的路徑是 '.'。"""
     text = path.read_text(encoding="utf-8")
@@ -180,6 +188,26 @@ def run(root):
             if signal_name not in signals(text) and callback not in script_members(text):
                 problems.append(f"{script.relative_to(root)}: connect 到不存在的 {callback}()")
     notes.append(f"訊號連接：檢查了 {connects} 處")
+
+    # --- 4b. 用到但沒宣告的常數 ---
+    #
+    # gdparse 只驗語法，抓不到「常數改名後有一處沒跟著改」——那在編輯器裡
+    # 要等執行到那一行才會報 Identifier not declared。實際踩過一次。
+    undeclared = 0
+    for script, text in script_text.items():
+        body = re.sub(r"#.*$", "", text, flags=re.M)
+        body = re.sub(r'"[^"]*"', '""', body)
+        declared = set(re.findall(r"^const\s+([A-Z][A-Z0-9_]*)", text, re.M))
+        for block in re.findall(r"^enum\s+\w*\s*\{([^}]*)\}", text, re.M | re.S):
+            declared |= set(re.findall(r"([A-Z][A-Z0-9_]*)", block))
+        for name in sorted(set(re.findall(r"(?<![.\w$])([A-Z][A-Z0-9_]{2,})\b", body))):
+            if name in declared or name in GODOT_GLOBALS:
+                continue
+            if any(name.startswith(prefix) for prefix in GODOT_PREFIXES):
+                continue
+            undeclared += 1
+            problems.append(f"{script.relative_to(root)}: 用到未宣告的常數 {name}")
+    notes.append(f"常數：{undeclared} 個用到但沒宣告")
 
     # --- 5. 角色身高：管線設定檔與遊戲名冊必須一致 ---
     heights_file = root / "assets" / "source" / "characters.json"
