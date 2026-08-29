@@ -63,10 +63,25 @@ Windows 用 [clumsy](https://jagt.github.io/clumsy/)，filter 設
 
 要調的三個數字都在 `player_character.gd` 最上面：`SYNC_HZ`、`REMOTE_LERP`、`TELEPORT_DISTANCE`。
 
-## 這份骨架尚未在引擎裡跑過
+## 檢查
 
-撰寫環境無法取得 Godot 執行檔，所有檔案是手寫的。結構、資源參照與縮排已用腳本檢查過，
-但**第一次開專案時請照這個順序確認**：
+```bash
+python3 tools/check_project.py
+```
+
+純 Python 就能跑：檢查 autoload 與 main_scene 的路徑、`.tscn` 的資源參照與 parent 路徑、
+腳本縮排。裝了 `gdtoolkit` 與 `godot-parser` 之後還會做 GDScript 語法、風格與場景結構檢查：
+
+```bash
+pip install "gdtoolkit==4.*" godot-parser
+```
+
+目前狀態：**GDScript 7/7 語法通過、gdlint 無問題、3 個場景全部解析成功。**
+
+## 但這份骨架仍未在引擎裡跑過
+
+撰寫環境無法取得 Godot 執行檔。上面的檢查能抓語法與路徑錯誤，抓不到執行期行為。
+**第一次開專案時請照這個順序確認**：
 
 1. 開啟專案，看輸出面板有沒有 script parse error
 2. `專案設定 → Autoload` 應有 NetworkService / PlayerRegistry / GameInput 三項

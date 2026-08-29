@@ -55,7 +55,10 @@ func _ready() -> void:
 
 	_label.text = display_name if not display_name.is_empty() else "Slot %d" % slot_id
 	var material := StandardMaterial3D.new()
-	material.albedo_color = SLOT_COLORS[slot_id % SLOT_COLORS.size()] if slot_id >= 0 else Color.WEBGRAY
+	if slot_id >= 0:
+		material.albedo_color = SLOT_COLORS[slot_id % SLOT_COLORS.size()]
+	else:
+		material.albedo_color = Color.WEBGRAY
 	for mesh in _visual.find_children("*", "MeshInstance3D"):
 		mesh.material_override = material
 

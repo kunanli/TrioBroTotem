@@ -22,6 +22,9 @@ const KEY_BINDINGS := {
 	"interact": [KEY_E],
 }
 
+## 手把沒有現成的 just_pressed，自己做邊緣偵測，否則按住會連跳。
+var _joy_jump_held := {}
+
 
 func _ready() -> void:
 	for action_name in KEY_BINDINGS:
@@ -44,10 +47,6 @@ func get_move_vector(device_id: int) -> Vector2:
 		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
 	)
 	return raw if raw.length() > 0.2 else Vector2.ZERO
-
-
-## 手把沒有現成的 just_pressed，自己做邊緣偵測，否則按住會連跳。
-var _joy_jump_held := {}
 
 
 func is_jump_pressed(device_id: int) -> bool:

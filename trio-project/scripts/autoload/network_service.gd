@@ -18,14 +18,14 @@ signal disconnected()
 signal peer_joined(peer_id: int)
 signal peer_left(peer_id: int)
 
+enum Mode { OFFLINE, HOST, CLIENT }
+
 const DEFAULT_PORT := 27015
 const DEFAULT_ADDRESS := "127.0.0.1"
 
 ## ENet 的連線上限。實際可玩人數由 PlayerSlot.MAX_SLOTS 決定，
 ## 這裡留餘裕是為了讓第四個人連得進來、再被明確拒絕，而不是連線逾時。
 const MAX_CLIENTS := 7
-
-enum Mode { OFFLINE, HOST, CLIENT }
 
 var mode: Mode = Mode.OFFLINE
 var last_error: String = ""
