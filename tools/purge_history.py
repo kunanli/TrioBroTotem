@@ -43,6 +43,21 @@ def repo_size():
     return f".git 共 {total / 1e6:.0f} MB（其中已打包 {packed}）"
 
 
+def filter_repo_command():
+    """git-filter-repo 可能是 PATH 上的執行檔，也可能只是個 Python 模組。
+
+    Windows 上 pip 裝的 console script 常常不在 PATH，只檢查執行檔會誤判成沒安裝。
+    """
+    executable = shutil.which("git-filter-repo")
+    if executable:
+        return [executable]
+    try:
+        import git_filter_repo  # noqa: F401
+    except ImportError:
+        return None
+    return [sys.executable, "-m", "git_filter_repo"]
+
+
 def matched_files():
     listed = git("ls-files", "assets").stdout.split("\n")
     return [ROOT / p for p in listed if p and Path(p).suffix.lower() in MATCH_SUFFIXES]
@@ -55,11 +70,27 @@ def main():
     parser.add_argument("--yes", action="store_true", help="確認執行（沒有這個旗標只會 dry run）")
     args = parser.parse_args()
 
-    if not shutil.which("git-filter-repo"):
-        sys.exit("找不到 git-filter-repo。先跑：pip install git-filter-repo")
+    filter_repo = filter_repo_command()
+    if filter_repo is None:
+        sys.exit(
+            "找不到 git-filter-repo。先跑：\n"
+            f"    {Path(sys.executable).name} -m pip install git-filter-repo\n"
+            "裝完若還是找不到，通常是 Scripts 資料夾不在 PATH 上——\n"
+            "這支腳本會自動改用 python -m git_filter_repo，所以裝好就行。"
+        )
 
     if git("status", "--porcelain").stdout.strip():
         sys.exit("working tree 不乾淨。先 commit 或 stash，改寫歷史前狀態要單純。")
+
+    git("fetch", "origin", check=False)
+
+    behind = git("rev-list", "--count", "HEAD..@{u}", check=False)
+    if behind.returncode == 0 and behind.stdout.strip() not in ("0", ""):
+        sys.exit(
+            f"遠端有 {behind.stdout.strip()} 個 commit 你本機還沒有。先 git pull。\n"
+            "改寫歷史之後要強制推送，而強制推送是「用本機覆蓋遠端」——\n"
+            "本機落後時按下去，那些 commit 就從遠端消失了。"
+        )
 
     ahead = git("rev-list", "--count", "@{u}..HEAD", check=False)
     if ahead.returncode == 0 and ahead.stdout.strip() not in ("0", ""):
@@ -92,7 +123,7 @@ def main():
 
     remote = git("remote", "get-url", "origin", check=False).stdout.strip()
     print("\n改寫歷史中……")
-    command = ["git-filter-repo", "--force", "--invert-paths"]
+    command = filter_repo + ["--force", "--invert-paths"]
     for glob in GLOBS:
         command += ["--path-glob", glob]
     result = subprocess.run(command, cwd=ROOT)
@@ -111,6 +142,9 @@ def main():
 
     print("\n最後一步——強制推送（確認上面的數字都對再執行）：")
     print("    git push --force origin main")
+    print("\n注意：強制推送是「用本機覆蓋遠端」。只有在剛剛跑完改寫、")
+    print("而且本機已經包含遠端所有 commit 時才安全——這支腳本開頭的")
+    print("「還有 N 個 commit 沒推上去」檢查就是在擋這件事。")
     return 0
 
 
