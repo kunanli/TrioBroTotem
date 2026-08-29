@@ -47,10 +47,12 @@ const STRUGGLE_TO_BREAK := 2.4
 const CARRY_SPEED_PENALTY := 0.7
 
 ## --- 鏡頭 ---
-## 鏡頭繞著角色身上某個比例高度的點轉，半徑固定。
-const CAMERA_DISTANCE := 6.5
-## 注視點取角色身高的幾成。用比例不用絕對值——三隻身高差 1.4 到 1.7 公尺，
-## 固定值會讓矮的那隻被鏡頭俯視、高的那隻被切到頭。
+## 距離與注視高度都用「角色身高的幾倍／幾成」表示，不用絕對值——
+## 三隻身高差 1.4 到 1.7 公尺，固定值會讓矮的看起來特別遠、高的被切到頭。
+##
+## 覺得角色太小：把 CAMERA_DISTANCE_RATIO 調小（拉近），
+## 或把 CAMERA_FOV 調小（縮視角，等於拉近但比較不犧牲看隊友的範圍）。
+const CAMERA_DISTANCE_RATIO := 3.1
 const CAMERA_TARGET_RATIO := 0.7
 
 ## 水平與垂直分開追隨，垂直**刻意慢很多**。
@@ -62,6 +64,9 @@ const CAMERA_VERTICAL_TIME := 0.28
 const CAMERA_PITCH_MIN := -0.10
 const CAMERA_PITCH_MAX := 1.15
 const CAMERA_PITCH_DEFAULT := 0.42
+
+## 視野角度。Godot 預設 75 偏廣，主角會顯得小又遠。
+const CAMERA_FOV := 62.0
 
 const MOUSE_SENSITIVITY := 0.0032
 const STICK_LOOK_SPEED := 2.6
@@ -139,6 +144,7 @@ func _ready() -> void:
 	# 鏡頭脫離角色的座標系，改成自己平滑追上去。
 	# 硬綁在角色身上時，角色每個物理幀的位移會原封不動變成鏡頭的抖動。
 	_camera.top_level = true
+	_camera.fov = CAMERA_FOV
 	_camera_anchor = _focus_target()
 	_place_camera()
 
@@ -199,9 +205,13 @@ func _focus_target() -> Vector3:
 	return global_position + Vector3.UP * (character_height * CAMERA_TARGET_RATIO)
 
 
+func _camera_distance() -> float:
+	return character_height * CAMERA_DISTANCE_RATIO
+
+
 ## 鏡頭相對於注視點的位移。
 func _orbit_offset() -> Vector3:
-	var arm := Vector3(0.0, sin(_camera_pitch), cos(_camera_pitch)) * CAMERA_DISTANCE
+	var arm := Vector3(0.0, sin(_camera_pitch), cos(_camera_pitch)) * _camera_distance()
 	return Basis(Vector3.UP, _camera_yaw) * arm
 
 

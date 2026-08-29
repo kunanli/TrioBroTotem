@@ -79,8 +79,14 @@ godot --path . -- --join=127.0.0.1
 `STOP_TIME = 0.07`（到停止）、`TURN_TIME = 0.07`（轉向）。數字越小越接近「按下就走」。
 基準是 Overcooked：回饋速度優先，不要重量感（docs/05）。覺得飄就調小，太滑溜就調大。
 
-**鏡頭**：`CAMERA_FOLLOW_TIME = 0.09`（水平追隨）、`CAMERA_VERTICAL_TIME = 0.28`（垂直追隨）、
-`CAMERA_DISTANCE = 6.5`、`MOUSE_SENSITIVITY`。
+**鏡頭**：`CAMERA_DISTANCE_RATIO = 3.1`（距離＝身高的幾倍）、`CAMERA_FOV = 62`、
+`CAMERA_FOLLOW_TIME = 0.09`（水平追隨）、`CAMERA_VERTICAL_TIME = 0.28`（垂直追隨）、
+`MOUSE_SENSITIVITY`。
+
+**角色看起來太小**有兩個調法，效果不同：把 `CAMERA_DISTANCE_RATIO` 調小是拉近鏡頭，
+會犧牲看到隊友與環境的範圍；把 `CAMERA_FOV` 調小是縮視角，角色變大但廣度損失較少。
+兩者都不想動的話，就改 `assets/source/characters.json` 的身高讓角色相對場景真的變大——
+那需要重跑 `normalize-all`。
 
 垂直刻意比水平慢三倍——兩者相同的話，跳躍與走斜坡時鏡頭會跟著上下彈，
 那是第三人稱最明顯的暈眩來源。覺得跳躍時鏡頭反應太慢就把
