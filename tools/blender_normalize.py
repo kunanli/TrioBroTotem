@@ -33,9 +33,27 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from inspect_model import guess_standard_name, is_leaf_bone  # noqa: E402
+from inspect_model import (  # noqa: E402
+    gltf_skeleton_height, guess_standard_name, is_leaf_bone,
+)
 
 TRI_MAX = 15_000
+
+## 檔名關鍵字 → 遊戲裡用的動畫名稱。
+## Meshy 的動畫名稱長這樣：Armature|Armature|Armature|walking_man|baselayer
+## 直接拿去 Godot 端寫死會很脆弱，統一在管線這一層正規化掉。
+ANIMATION_NAMES = [
+    ("idle", ("idle", "stand", "breath")),
+    ("walk", ("walk",)),
+    ("run", ("run", "sprint", "jog")),
+    ("jump", ("jump",)),
+    ("fall", ("fall", "air")),
+    ("attack", ("attack", "punch", "slash", "swing", "kick", "hit_")),
+    ("hurt", ("hurt", "damage", "impact", "flinch", "gethit")),
+    ("death", ("death", "die", "dead")),
+    ("carry", ("carry", "lift", "hold")),
+    ("victory", ("victory", "win", "cheer", "dance")),
+]
 
 
 def parse_args(argv):
@@ -45,6 +63,8 @@ def parse_args(argv):
         argv = [a for a in argv[1:] if not a.endswith(".py")]
     parser = argparse.ArgumentParser(description="正規化 Meshy 匯出的角色模型")
     parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--animation", type=Path, action="append", default=[],
+                        help="額外的動畫檔（可重複）。共用同一套 rig 時動作會併進來")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--map", type=Path, help="骨骼改名對照表 JSON；不給就自動推導")
     parser.add_argument("--tri-max", type=int, default=TRI_MAX, help=f"面數上限（預設 {TRI_MAX}）")
@@ -72,6 +92,41 @@ def import_model(path):
         bpy.ops.import_scene.fbx(filepath=str(path))
     else:
         raise SystemExit(f"不支援的格式：{suffix}（請用 .glb / .gltf / .fbx）")
+
+
+def animation_name(source, fallback):
+    """從檔名推出動畫名稱。認不出來就用 fallback。"""
+    lowered = source.lower()
+    for name, keywords in ANIMATION_NAMES:
+        if any(k in lowered for k in keywords):
+            return name
+    return fallback
+
+
+def collect_animations(armature, extra_files):
+    """把其他檔案裡的動作併進這個骨架。
+
+    Meshy 一個檔案只帶一支動畫，所以「走路 + 攻擊 + 待機」會是三個匯出檔。
+    它們共用同一套 rig，骨骼名稱一致，動作可以直接轉掛到同一個骨架上。
+    匯入帶進來的多餘物件用完就刪，只留動作本身。
+    """
+    merged = []
+    for path in extra_files:
+        before = set(bpy.data.actions)
+        keep = set(bpy.data.objects)
+        try:
+            import_model(path)
+        except Exception as error:
+            print(f"! 匯入 {path.name} 失敗：{error}")
+            continue
+        added = [a for a in bpy.data.actions if a not in before]
+        for action in added:
+            action.name = animation_name(path.stem, action.name)
+            action.use_fake_user = True  # 沒有物件用它時才不會在存檔時被丟掉
+            merged.append(action.name)
+        for obj in [o for o in bpy.data.objects if o not in keep]:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    return merged
 
 
 def find_armature():
@@ -244,6 +299,42 @@ def measure(meshes):
     )
 
 
+def scale_rig(armature, meshes, factor):
+    """把整組角色縮放 factor 倍——直接改資料，不動物件的 transform。
+
+    為什麼不能用 bpy.ops.object.transform_apply(scale=True)：它只把縮放
+    烤進網格頂點，骨架的骨骼資料原封不動。而 glTF 匯出器的骨架是讀骨骼
+    資料、不是讀物件 scale，結果就是網格 1.6 公尺、骨架還停在 0.015——
+    Blender 場景裡看起來完全正常，匯出後才發現角色只有一公分半。
+
+    要同時改三個地方，缺一不可：骨骼的 head/tail、網格頂點、
+    動作裡的位移曲線（骨骼位移沒跟著縮放，動畫會把角色扯散）。
+    """
+    if abs(factor - 1.0) < 1e-9:
+        return
+
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    for bone in armature.data.edit_bones:
+        bone.head = bone.head * factor
+        bone.tail = bone.tail * factor
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    for obj in meshes:
+        for vertex in obj.data.vertices:
+            vertex.co = vertex.co * factor
+        obj.data.update()
+
+    for action in bpy.data.actions:
+        for curve in iter_fcurves(action):
+            if not curve.data_path.endswith(".location"):
+                continue
+            for point in curve.keyframe_points:
+                point.co.y *= factor
+                point.handle_left.y *= factor
+                point.handle_right.y *= factor
+
+
 def normalise_transforms(armature, meshes, target_height):
     """套用 rotation 與 scale，並在指定 target_height 時把角色縮放到該高度。
 
@@ -270,16 +361,14 @@ def normalise_transforms(armature, meshes, target_height):
 
     if target_height > 0.0 and height > 0.0:
         factor = target_height / height
-        armature.scale = armature.scale * factor
+        scale_rig(armature, meshes, factor)
         print(f"高度正規化：{fmt(height)} → {fmt(target_height)}（係數 {fmt(factor)}）")
     elif target_height > 0.0:
         print("! 量不到高度，跳過高度正規化")
 
+    # 物件層級殘留的 scale 還是要清掉，但真正的縮放已經由 scale_rig 做完。
     select_all()
-    result = bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    leftover = [o for o in targets if any(abs(v - 1.0) > 1e-4 for v in o.scale)]
-    for obj in leftover:
-        print(f"! {obj.name} 的 scale 仍是 {tuple(round(v, 4) for v in obj.scale)}，未能套用（{'/'.join(result)}）")
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
     width, depth, height = measure(meshes)
     print(f"最終尺寸：寬 {fmt(width)} × 深 {fmt(depth)} × 高 {fmt(height)} 公尺")
@@ -339,6 +428,7 @@ def export_glb(path, image_format="AUTO"):
         "export_image_format": image_format,
         "export_apply": True,
         "export_animations": True,
+        "export_animation_mode": "ACTIONS",
         "export_skins": True,
         "export_yup": True,
     }
@@ -349,6 +439,39 @@ def export_glb(path, image_format="AUTO"):
         print(f"! 這個 Blender 版本不認得的匯出參數，已略過：{', '.join(sorted(dropped))}")
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.export_scene.gltf(**kwargs)
+
+
+def export_verified(armature, meshes, path, image_format, target_height):
+    """匯出後回頭讀檔量高度，不對就修正係數重匯。
+
+    為什麼要這樣：Blender 場景裡量到 1.7 公尺的模型，匯出後實際是 0.017——
+    transform_apply 與 glTF 匯出器之間的交互作用會讓尺寸差 100 倍，
+    而場景端完全看不出來。唯一可靠的驗收對象是產出的檔案本身。
+
+    縮放是線性的，所以一次修正就會收斂；仍留第二次當保險。
+    """
+    for attempt in range(3):
+        export_glb(path, image_format)
+        height = gltf_skeleton_height(path)
+        if height <= 0.0:
+            print("! 產出的檔案量不到骨架高度，跳過驗收")
+            return
+        print(f"產出檔骨架高度：{fmt(height)} 公尺")
+
+        if target_height <= 0.0:
+            if height < 0.1 or height > 100.0:
+                print(f"! {fmt(height)} 公尺明顯不合理。用 --target-height 指定身高即可。")
+            return
+
+        error = abs(height - target_height) / target_height
+        if error < 0.02:
+            return
+        if attempt == 2:
+            print(f"! 修正兩次後仍是 {fmt(height)} 公尺，與目標 {fmt(target_height)} 不符")
+            return
+        correction = target_height / height
+        scale_rig(armature, meshes, correction)
+        print(f"修正縮放 ×{fmt(correction)} 後重新匯出")
 
 
 def main():
@@ -367,6 +490,15 @@ def main():
     print(f"\n骨架 '{armature.name}'：{len(armature.data.bones)} 根骨骼、"
           f"{len(meshes)} 個網格、{triangle_count(meshes):,} 三角面、"
           f"{len(bpy.data.actions)} 個動作")
+
+    base_action = next(iter(bpy.data.actions), None)
+    if base_action is not None:
+        base_action.name = animation_name(args.input.stem, base_action.name)
+        base_action.use_fake_user = True
+        print(f"動畫：{base_action.name}（來自 {args.input.name}）")
+    if args.animation:
+        merged = collect_animations(armature, args.animation)
+        print(f"併入動畫：{'、'.join(merged) if merged else '無'}")
 
     mapping = build_mapping(armature, args.map)
     rename_bones(armature, meshes, mapping)
@@ -388,7 +520,7 @@ def main():
     if args.texture_size > 0:
         resize_textures(args.texture_size)
 
-    export_glb(args.output, args.texture_format)
+    export_verified(armature, meshes, args.output, args.texture_format, args.target_height)
     print(f"\n已輸出 {args.output}（{final_tris:,} 三角面）")
     print(f"驗貨：python3 tools/inspect_model.py {args.output}")
 

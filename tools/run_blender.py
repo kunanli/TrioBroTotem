@@ -121,11 +121,15 @@ def normalize_all(blender, args):
         models = sorted(folder.rglob("*.fbx")) + sorted(folder.rglob("*.glb"))
         if not models:
             continue
-        if len(models) > 1:
-            print(f"! {folder.name} 底下有 {len(models)} 個模型，只處理 {models[0].name}")
+        # Meshy 一個檔案一支動畫。第一個當底模，其餘只取動作併進來。
+        base, animations = models[0], models[1:]
         output = OUTPUT_DIR / f"{folder.name.lower()}.glb"
         print(f"\n{'=' * 60}\n{folder.name} → {output.relative_to(TOOLS.parent)}")
-        extra = ["--input", str(models[0]), "--output", str(output)]
+        if animations:
+            print(f"底模 {base.name}，另外併入 {len(animations)} 支動畫")
+        extra = ["--input", str(base), "--output", str(output)]
+        for path in animations:
+            extra += ["--animation", str(path)]
         # 命令列給的 --target-height 優先於設定檔。
         height = heights.get(output.stem)
         if height and "--target-height" not in args.rest:

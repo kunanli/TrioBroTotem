@@ -202,6 +202,21 @@ def skeleton_extent(gltf, joints, parents):
     return max(size), size
 
 
+def gltf_skeleton_height(path):
+    """直接從 GLB 檔算骨架高度（公尺，Y-up）。
+
+    給正規化流程驗收用：Blender 場景裡量到的尺寸不等於匯出結果，
+    唯一可靠的是回頭讀產出的檔案。
+    """
+    gltf = load_gltf(Path(path))
+    skins = gltf.get("skins", [])
+    if not skins:
+        return 0.0
+    joints = skins[0].get("joints", [])
+    _, size = skeleton_extent(gltf, joints, build_parents(gltf))
+    return size[1]
+
+
 def build_parents(gltf):
     parents = {}
     for index, node in enumerate(gltf.get("nodes", [])):
