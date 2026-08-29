@@ -52,6 +52,8 @@ collision_mask = 6
 [node name="Shape" type="CollisionShape3D" parent="Visual/GrabProbe"]
 shape = SubResource("SphereShape3D_grab")
 
+[node name="StackAnchor" type="Node3D" parent="."]
+
 [node name="NameLabel" type="Label3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, 0)
 billboard = 1

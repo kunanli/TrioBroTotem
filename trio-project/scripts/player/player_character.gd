@@ -46,6 +46,10 @@ const STRUGGLE_TO_BREAK := 2.4
 ## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
 const CARRY_SPEED_PENALTY := 0.7
 
+## 疊高偵測的往下探測長度（從腳底往下），以及送出請求的最短間隔。
+const STACK_PROBE_LENGTH := 0.5
+const STACK_REQUEST_INTERVAL := 0.2
+
 ## --- 鏡頭 ---
 ## 距離與注視高度都用「角色身高的幾倍／幾成」表示，不用絕對值——
 ## 三隻身高差 1.4 到 1.7 公尺，固定值會讓矮的看起來特別遠、高的被切到頭。
@@ -94,6 +98,9 @@ var character_height: float = 1.8
 ## 正被誰扛著，-1 表示沒有。由 host 透過 CarrySystem 廣播寫入。
 var carried_by_slot: int = -1
 
+## 正踩在誰頭上，-1 表示沒有。由 host 透過 StackSystem 廣播寫入。
+var stacked_on: int = -1
+
 # --- 被複製的狀態（權威端寫，其他人讀）---
 var net_position: Vector3 = Vector3.ZERO
 var net_velocity: Vector3 = Vector3.ZERO
@@ -103,6 +110,7 @@ var _yaw: float = 0.0
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 var _throw_charge: float = 0.0
 var _struggle: float = 0.0
+var _next_stack_request: float = 0.0
 
 ## 鏡頭角度與追隨中的注視點。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
 var _camera_yaw: float = 0.0
@@ -111,6 +119,7 @@ var _camera_anchor: Vector3 = Vector3.ZERO
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
+@onready var stack_anchor: Node3D = $StackAnchor
 
 @onready var _character: CharacterVisual = $Visual/Character
 @onready var _collision: CollisionShape3D = $Collision
@@ -190,6 +199,7 @@ func _setup_character() -> void:
 		_collision.shape = capsule  # 一定要 duplicate，否則三隻共用同一份形狀
 
 	carry_anchor.position.y = character_height * 0.95
+	stack_anchor.position.y = character_height * 0.5
 	_label.position.y = character_height * 0.62
 
 	if _character.load_character(character_id):
@@ -307,6 +317,8 @@ func is_carrying() -> bool:
 func _physics_process(delta: float) -> void:
 	if carried_by_slot >= 0:
 		_process_carried(delta)
+	elif stacked_on >= 0:
+		_process_stacked()
 	elif is_multiplayer_authority():
 		_process_authority(delta)
 	else:
@@ -319,6 +331,11 @@ func _process_authority(delta: float) -> void:
 	# 每一幀都問，不能只在著地時問——手把的 just_pressed 是自己做的邊緣偵測，
 	# 漏問幾幀狀態就會過期，導致「握著跳鍵落地後跳不起來」。
 	var jump_pressed := GameInput.is_jump_pressed(device_id)
+	if jump_pressed and is_on_floor() and StackSystem.rider_of(slot_id) >= 0:
+		# 底層跳躍 → 整柱潰散（docs/04）。要在跳之前送，
+		# 否則上層會先跟著飛起來再被拆，看起來像 bug。
+		# 先確認頭上真的有人再送——疊高狀態是廣播同步的，客戶端本來就知道。
+		StackSystem.request_collapse.rpc_id(1, slot_id)
 	if is_on_floor():
 		# 著地時一定要歸零。原本只在跳躍時才寫 velocity.y，
 		# 落地後那個很大的負值會一直留著——走下平台的瞬間會像被吸下去。
@@ -348,10 +365,37 @@ func _process_authority(delta: float) -> void:
 		_yaw = lerp_angle(_yaw, atan2(-wish.x, -wish.z), 1.0 - exp(-delta / TURN_TIME))
 
 	_process_carry_input(delta)
+	_process_stack_probe()
 
 	net_position = global_position
 	net_velocity = velocity
 	net_yaw = _yaw
+
+
+## 疊高不佔按鍵（docs/06）：往下探到隊友的頭就送出請求。
+##
+## 只在下墜時偵測。站著往旁邊走過去也會探到人，那時吸附會很突兀——
+## 要有「跳上去」這個動作，疊高才像是玩家做的事而不是走路的副作用。
+func _process_stack_probe() -> void:
+	if stacked_on >= 0 or velocity.y > 0.0 or is_on_floor():
+		return
+	# 節流。物理跑 120 Hz，落在隊友頭上的那段時間會送出幾十個一模一樣的
+	# 請求——host 只會接受第一個，其餘全是白花的頻寬。
+	var now := Time.get_ticks_msec() / 1000.0
+	if now < _next_stack_request:
+		return
+	_next_stack_request = now + STACK_REQUEST_INTERVAL
+	var feet := global_position - Vector3.UP * (character_height * 0.5)
+	var query := PhysicsRayQueryParameters3D.create(feet, feet - Vector3.UP * STACK_PROBE_LENGTH)
+	query.collision_mask = 2  # 只找玩家
+	query.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return
+	var other := hit.get("collider")
+	if other == null or not (other is PlayerCharacter):
+		return
+	StackSystem.request_stack.rpc_id(1, slot_id, other.slot_id)
 
 
 ## 只送請求，不自己決定結果。目標查詢與重量驗證都在 host（TD-02）。
@@ -375,6 +419,39 @@ func _process_carry_input(delta: float) -> void:
 	elif _throw_charge > 0.0:
 		CarrySystem.request_throw.rpc_id(1, slot_id, _throw_charge)
 		_throw_charge = 0.0
+
+
+## 由 StackSystem 呼叫，不要從別的地方寫。
+func on_stacked(base_slot: int) -> void:
+	stacked_on = base_slot
+	velocity = Vector3.ZERO
+
+
+func on_unstacked(push: Vector3) -> void:
+	stacked_on = -1
+	velocity = push
+
+
+## 踩在別人頭上時，位置由下層的頭頂錨點推導（TD-05 邏輯附掛）。
+##
+## 不做 reparent、也不靠物理堆疊：位置是「下層錨點 + 自己的半身高」，
+## 整柱只有底座在跑物理。這樣底座一動，上面的人自然跟著走，
+## 而且三台機器算出來的結果完全一致——因為底座的位置本來就有同步。
+func _process_stacked() -> void:
+	var base := CarrySystem.find_player(stacked_on)
+	if base == null:
+		return
+	global_position = base.stack_anchor.global_position + Vector3.UP * (character_height * 0.5)
+	velocity = Vector3.ZERO
+	net_position = global_position
+	net_velocity = Vector3.ZERO
+
+	if not is_multiplayer_authority():
+		return
+	# 上層仍保有鏡頭自由（docs/04 被抓者仍保有鏡頭旋轉，疊高同理），
+	# 但移動輸入不推動角色——上層是乘客，不是共同施力者。
+	if GameInput.is_jump_pressed(device_id):
+		StackSystem.request_dismount.rpc_id(1, slot_id)
 
 
 ## 被扛著時位置由 Carryable 決定，這裡只做兩件事：面向持有者的方向、累積掙扎。

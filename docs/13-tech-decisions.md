@@ -186,7 +186,7 @@ RightUpperLeg / RightLowerLeg / RightFoot / RightToes
 
 **延後至 M1 之後**：混合分屏、動態分屏合併、合體形態的三人共同輸入。TD-04 已為分屏留好位子，不需要在 M0 實作。
 
-**進度與跑法**：見 [`trio-project/README.md`](../trio-project/README.md)。步驟 0 的骨架已建立。
+**進度與跑法**：見 [`trio-project/README.md`](../trio-project/README.md)。步驟 0 至 2 已實作，尚未在引擎驗證。
 
 ---
 
