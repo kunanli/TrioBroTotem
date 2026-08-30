@@ -13,7 +13,9 @@ extends RefCounted
 ##
 ## idle_hold 是「沒有 idle 動畫時，走路動畫要停在哪一幀」（0 到 1 的比例）。
 ## Meshy 目前只給了走路，站著不動時得從走路循環裡挑一個看起來像站姿的位置。
-## 之後真的有 idle 了，CharacterVisual 會自動改用它，這個欄位就沒作用了。
+## 0.55 是實測掃過整個循環挑出來的：三隻在這一幀雙腳最靠攏（前後距離 0.00–0.02
+## 個身高，對比第 0 幀的 0.04–0.06、跨步中的 0.31）。之後真的有 idle 了，
+## CharacterVisual 會自動改用它，這個欄位就沒作用了。
 ##
 ## pose 是程序化姿態層的參數（scripts/player/procedural_pose.gd）。
 ## 角度單位是度，Vector3(X, Y, Z) 在「角色空間」下解讀：
@@ -28,7 +30,7 @@ const CHARACTERS := {
 		"weight": WeightLadder.PIG,
 		"height": 1.6,
 		"yaw_offset": 180.0,
-		"idle_hold": 0.0,
+		"idle_hold": 0.55,
 		"pose": {
 			"breath_amplitude": 1.4,
 			"breath_period": 4.0,
@@ -52,7 +54,7 @@ const CHARACTERS := {
 		"weight": WeightLadder.FROG,
 		"height": 1.4,
 		"yaw_offset": 180.0,
-		"idle_hold": 0.0,
+		"idle_hold": 0.55,
 		"pose": {
 			"breath_amplitude": 0.6,
 			"breath_period": 4.6,
@@ -63,8 +65,13 @@ const CHARACTERS := {
 				&"Spine": Vector3(2.0, 0.0, 0.0),
 				&"Chest": Vector3(2.5, 0.0, 0.0),
 				&"Head": Vector3(-4.0, 0.0, 0.0),
-				&"LeftUpperArm": Vector3(0.0, 0.0, -8.0),
-				&"RightUpperArm": Vector3(0.0, 0.0, 8.0),
+				# 這隻的骨架本身手就張得很開：實測手離身體中線 0.66 個身高，
+				# 豬與貓只有 0.38–0.42，而且整個走路循環都一樣，不是挑幀能解決的。
+				# 所以這裡是往內收（左臂 Z 正、右臂 Z 負），跟另外兩隻方向相反。
+				# 52 度是掃出來的：26 → 0.575、40 → 0.498、52 → 0.423，
+				# 落在貓 0.407 與豬 0.477 之間，法師本來就該比戰士收斂。
+				&"LeftUpperArm": Vector3(0.0, 0.0, 52.0),
+				&"RightUpperArm": Vector3(0.0, 0.0, -52.0),
 				&"LeftLowerArm": Vector3(-34.0, 0.0, 0.0),
 				&"RightLowerArm": Vector3(-34.0, 0.0, 0.0),
 			},
@@ -76,7 +83,7 @@ const CHARACTERS := {
 		"weight": WeightLadder.CAT,
 		"height": 1.7,
 		"yaw_offset": 180.0,
-		"idle_hold": 0.0,
+		"idle_hold": 0.55,
 		"pose": {
 			"breath_amplitude": 0.8,
 			"breath_period": 2.6,
