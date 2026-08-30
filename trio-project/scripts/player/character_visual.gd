@@ -22,7 +22,11 @@ const CLIP_ALIASES := {
 	&"idle": ["idle", "stand", "breath"],
 	&"walk": ["walk"],
 	&"run": ["run", "sprint", "jog"],
-	&"attack": ["attack", "punch", "slash", "swing"],
+	&"attack1": ["attack1", "attack"],
+	&"attack2": ["attack2"],
+	&"attack3": ["attack3"],
+	&"attack_dash": ["attack_dash", "dash"],
+	&"attack_air": ["attack_air"],
 	&"hurt": ["hurt", "damage", "flinch"],
 	&"death": ["death", "die", "dead"],
 	&"carry": ["carry", "lift", "hold"],
@@ -32,6 +36,10 @@ const LOCOMOTION: Array[StringName] = [&"idle", &"walk", &"run"]
 
 ## 切換動畫的交叉淡入時間。太短會有跳動，太長會拖。
 const BLEND_TIME := 0.15
+
+## 攻擊的混合時間要短得多。light_1 的前搖只有 0.08 秒（CombatSpec），
+## 用 0.15 秒去混會把整個出手糊掉——玩家看到的是「動作還沒到就已經打中了」。
+const ACTION_BLEND_TIME := 0.04
 
 ## 走路動畫「原本」對應的移動速度。用來讓播放速度跟著實際移動速度走，
 ## 否則腳會在地上滑。調到腳不滑為止。
@@ -60,6 +68,7 @@ var _freeze_timer: float = 0.0
 
 var _player: AnimationPlayer = null
 var _model: Node3D = null
+var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
 var _action: StringName = &""
 
@@ -100,6 +109,12 @@ func load_character(id: StringName) -> bool:
 		push_warning("[Visual] %s 裡沒有 AnimationPlayer——模型沒有動畫" % id)
 		return true
 
+	# 生成的戰鬥動畫要在查表之前掛上去，這樣它們以精確名稱勝出；
+	# 之後美術補進來的 idle/walk/run 仍然走關鍵字比對（TD-12）。
+	if _skeleton != null:
+		var forged := MotionForge.attach(_player, _skeleton, self, id)
+		if forged == 0:
+			push_warning("[Visual] %s 沒建出任何生成動畫" % id)
 	_resolve_clips()
 	# 匯入的動畫預設不循環，移動類的要自己打開，否則走一步就停住。
 	for logical in LOCOMOTION:
@@ -201,11 +216,11 @@ func _attach_pose(entry: Dictionary) -> void:
 	if skeletons.is_empty():
 		push_warning("[Visual] %s 沒有 Skeleton3D，跳過程序化姿態" % character_id)
 		return
-	var skeleton: Skeleton3D = skeletons[0]
+	_skeleton = skeletons[0]
 	_pose = ProceduralPose.new()
 	_pose.name = "ProceduralPose"
 	_pose.configure(entry, self)
-	skeleton.add_child(_pose)
+	_skeleton.add_child(_pose)
 
 
 ## 建立「邏輯名稱 -> 模型裡真正的動畫名稱」。先找精確名稱，再退回關鍵字比對。
@@ -216,6 +231,12 @@ func _resolve_clips() -> void:
 		var logical: StringName = key
 		if _player.has_animation(logical):
 			_clips[logical] = logical
+			continue
+		# 生成的片段掛在自己的 library 裡，名字是 "forged/attack1"。
+		# 明確查一次，不要靠關鍵字比對去撞——那會隨動畫清單的排序而定。
+		var forged := StringName("%s/%s" % [MotionForge.LIBRARY_NAME, logical])
+		if _player.has_animation(forged):
+			_clips[logical] = forged
 			continue
 		var keywords: Array = CLIP_ALIASES[logical]
 		for item in list:
@@ -363,7 +384,7 @@ func play_action(logical: StringName) -> bool:
 		return false
 	_action = clip
 	_player.speed_scale = 1.0
-	_player.play(clip, BLEND_TIME)
+	_player.play(clip, ACTION_BLEND_TIME)
 	if _pose != null:
 		_pose.set_acting(true)
 	return true

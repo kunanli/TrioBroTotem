@@ -60,6 +60,16 @@ const REVIVE_RANGE := 2.2
 ## 頭部看向的偵測半徑。超過這個距離就不轉頭了——遠處的隊友不值得一直盯著。
 const LOOK_RANGE := 9.0
 
+## CombatSpec 的段名 → 生成動畫的片段名（TD-12）。
+## 兩邊都由 CombatSpec 驅動，所以段的時間軸與動畫的時間軸是同一組數字。
+const ATTACK_CLIPS := {
+	&"light_1": &"attack1",
+	&"light_2": &"attack2",
+	&"heavy_3": &"attack3",
+	&"dash": &"attack_dash",
+	&"air": &"attack_air",
+}
+
 ## 倒地時模型往前趴的角度。這是 ragdoll 的暫代表現——
 ## 真正的 PhysicalBone3D 是下一步，先把網路模型驗起來（TD-06）。
 const DOWNED_PITCH := -80.0
@@ -495,8 +505,9 @@ func _attack_context() -> StringName:
 	return &"stand"
 
 
-func on_attack_started(_spec: Dictionary) -> void:
-	_character.play_action(&"attack")
+func on_attack_started(spec: Dictionary) -> void:
+	var step: StringName = StringName(str(spec.get("name", "light_1")))
+	_character.play_action(ATTACK_CLIPS.get(step, &"attack1"))
 
 
 ## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。
@@ -512,6 +523,8 @@ func combat_kind() -> StringName:
 ## 被打到。擊退永遠生效，扣血由 host 依誤傷開關決定（docs/04）。
 func take_hit(damage: float, impulse: Vector3) -> void:
 	_character.flash()
+	if not is_downed:
+		_character.play_action(&"hurt")
 	if is_multiplayer_authority():
 		velocity = impulse
 	if NetworkService.is_host() and damage > 0.0:

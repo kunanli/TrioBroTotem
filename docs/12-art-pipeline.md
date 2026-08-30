@@ -86,6 +86,47 @@
 2. **骨骼改名要連動三個地方**：骨骼本身、網格的頂點群組、動作的曲線路徑。漏掉第三個時，
    骨架看起來完全正確，動畫卻整個不動，而且**不會有任何錯誤訊息**——這是最難查的一種壞法。
 
+3. **動畫名稱不能只看檔名。** Meshy 的檔案以角色命名（`pig_warrior.glb`），動作的名字
+   藏在 action 裡（`Armature|Armature|Armature|walking_man|baselayer`）。只比對檔名的話
+   分類永遠失敗，那串原始字串就會原封不動進遊戲，Godot 端找不到 `walk`，角色站著不動。
+   `animation_name()` 現在檔名與 action 名兩邊都比對。**這個 bug 跟著模型上線過一次。**
+
+---
+
+### 動畫的來源：循環動作外購，戰鬥動作生成（TD-12）
+
+| 動作 | 來源 | 理由 |
+|---|---|---|
+| `idle` / `walk` / `run` | Mixamo | 動捕出身，重心轉移與腳步落地的細節程式算不出來 |
+| `attack1`–`attack3`、`attack_dash`、`attack_air`、`hurt`、`death` | 程式生成（`scripts/player/motion_forge.gd`） | 時間軸直接從 `CombatSpec` 算，出手的那一幀就是判定窗口打開的那一幀 |
+
+**Mixamo 的下載設定**（勾錯了不會報錯，只會表現得很怪）：
+
+| 設定 | 選什麼 | 勾錯的後果 |
+|---|---|---|
+| Format | FBX Binary | — |
+| Skin | 底模那一支選 **With Skin**，其餘動作選 **Without Skin** | 每支都帶 skin 會讓每次匯入多一份網格與貼圖 |
+| **In Place** | **打勾** | 沒勾的話位移寫在 Hips 曲線裡，角色會自己往前飄。管線的 `strip_root_motion()` 會補救並印訊息，但別依賴它 |
+| Frames per Second | 30 | — |
+| Keyframe Reduction | none | 減幀會把出手的急停磨掉 |
+
+放法（`normalize-all` 取資料夾裡的第一個檔案當底模，其餘只取動作）：
+
+```
+assets/source/pig_warrior/
+  pig_warrior.glb        ← 底模（Meshy 的原始角色，或 Mixamo 的 with skin）
+  Walking.fbx
+  Running.fbx
+  Standing Idle.fbx
+```
+
+檔名決定動作名稱：`Walking` → `walk`、`Standing Idle` → `idle`、`Running` → `run`
+（對照表在 `blender_normalize.py` 的 `ANIMATION_NAMES`）。兩個檔案分類到同一個名稱時
+會自動加序號並印警告；要明確指定就用 `--name`。
+
+**如果 Mixamo 已經下線**：同一條管線接 Meshy 的動作庫或任何共用同一套 rig 的來源，
+不必改程式——`collect_animations()` 只要求骨骼名稱一致。
+
 ### 資產規格
 
 | 項目 | 規格 |

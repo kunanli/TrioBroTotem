@@ -65,6 +65,11 @@ def parse_args(argv):
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--animation", type=Path, action="append", default=[],
                         help="額外的動畫檔（可重複）。共用同一套 rig 時動作會併進來")
+    parser.add_argument("--name", type=str, action="append", default=[],
+                        help="明確指定動畫名稱，依序對應 --animation。"
+                             "第一個給底模自己的動作。給空字串表示沿用檔名推導")
+    parser.add_argument("--keep-root-motion", action="store_true",
+                        help="保留 Hips 的水平位移。預設會剝掉（TD-08：不使用 root motion）")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--map", type=Path, help="骨骼改名對照表 JSON；不給就自動推導")
     parser.add_argument("--tri-max", type=int, default=TRI_MAX, help=f"面數上限（預設 {TRI_MAX}）")
@@ -95,23 +100,91 @@ def import_model(path):
 
 
 def animation_name(source, fallback):
-    """從檔名推出動畫名稱。認不出來就用 fallback。"""
-    lowered = source.lower()
-    for name, keywords in ANIMATION_NAMES:
-        if any(k in lowered for k in keywords):
-            return name
+    """推出動畫名稱：先看檔名，再看動作原本的名字，都認不出來才用 fallback。
+
+    只看檔名是不夠的。Meshy 的檔案以角色命名（pig_warrior.glb），動作名稱藏在
+    action 裡（"Armature|Armature|Armature|walking_man|baselayer"）——只比對檔名
+    永遠分類失敗，於是那串原始字串就這樣進了遊戲。Godot 端因此看不到 "walk"，
+    角色站著不動。這個 bug 已經跟著模型上線過一次。
+    """
+    for text in (source, fallback):
+        lowered = str(text).lower()
+        for name, keywords in ANIMATION_NAMES:
+            if any(k in lowered for k in keywords):
+                return name
     return fallback
 
 
-def collect_animations(armature, extra_files):
+def unique_name(wanted, taken):
+    """動作重名時加序號。
+
+    Mixamo 的檔名常常好幾支都命中同一個關鍵字（Sword Slash / Great Sword Slash
+    都是 attack）。Blender 遇到重名的 action 會自己加 .001 後綴，匯出後在 Godot
+    裡變成 "attack.001" 這種認不得的名字，而且過程中不出聲。這裡明確處理，
+    並印出來讓人看見。
+    """
+    if wanted not in taken:
+        taken.add(wanted)
+        return wanted
+    index = 2
+    while f"{wanted}{index}" in taken:
+        index += 1
+    renamed = f"{wanted}{index}"
+    taken.add(renamed)
+    print(f"! 動作名稱 '{wanted}' 重複，這一支改叫 '{renamed}'"
+          f"（要指定名稱請用 --name）")
+    return renamed
+
+
+def strip_root_motion(armature):
+    """剝掉 Hips 的水平位移（TD-08）。
+
+    Mixamo 下載時沒勾 In Place 的動作，位移是寫在 Hips 的 location 曲線裡的。
+    遊戲的移動由 CharacterBody3D 負責，動畫再帶一份位移的結果是角色自己往前飄，
+    而且沒有任何錯誤訊息——只有「怎麼走路會滑走」。
+
+    Y 軸保留：走路的上下起伏是動作的一部分，剝掉會變成滑行。
+    """
+    root = None
+    for candidate in ("Hips", "mixamorig:Hips", "Pelvis", "Root"):
+        if candidate in armature.pose.bones:
+            root = candidate
+            break
+    if root is None:
+        # 還沒改名時骨架的根骨就是沒有父的那一根
+        roots = [b.name for b in armature.data.bones if b.parent is None]
+        if len(roots) != 1:
+            return 0
+        root = roots[0]
+
+    token = f'pose.bones["{root}"].location'
+    cleared = 0
+    for action in bpy.data.actions:
+        for curve in list(iter_fcurves(action)):
+            if curve.data_path != token or curve.array_index == 1:
+                continue  # 只動 X 與 Z
+            base = curve.evaluate(curve.keyframe_points[0].co[0]) if curve.keyframe_points else 0.0
+            for point in curve.keyframe_points:
+                point.co[1] = base
+                point.handle_left[1] = base
+                point.handle_right[1] = base
+            cleared += 1
+    return cleared
+
+
+def collect_animations(armature, extra_files, taken, explicit=None):
     """把其他檔案裡的動作併進這個骨架。
 
-    Meshy 一個檔案只帶一支動畫，所以「走路 + 攻擊 + 待機」會是三個匯出檔。
-    它們共用同一套 rig，骨骼名稱一致，動作可以直接轉掛到同一個骨架上。
-    匯入帶進來的多餘物件用完就刪，只留動作本身。
+    Meshy 一個檔案只帶一支動畫，Mixamo 也是一個動作一個下載檔，所以
+    「走路 + 跑步 + 待機」會是三個檔。它們共用同一套 rig，骨骼名稱一致，
+    動作可以直接轉掛到同一個骨架上。匯入帶進來的多餘物件用完就刪，只留動作。
+
+    taken 是已經用掉的名稱，重名會加序號（見 unique_name）。
+    explicit 依序覆蓋每個檔案的名稱，空字串表示沿用檔名推導。
     """
+    explicit = explicit or []
     merged = []
-    for path in extra_files:
+    for index, path in enumerate(extra_files):
         before = set(bpy.data.actions)
         keep = set(bpy.data.objects)
         try:
@@ -120,10 +193,14 @@ def collect_animations(armature, extra_files):
             print(f"! 匯入 {path.name} 失敗：{error}")
             continue
         added = [a for a in bpy.data.actions if a not in before]
+        override = explicit[index] if index < len(explicit) else ""
         for action in added:
-            action.name = animation_name(path.stem, action.name)
+            wanted = override or animation_name(path.stem, action.name)
+            action.name = unique_name(wanted, taken)
             action.use_fake_user = True  # 沒有物件用它時才不會在存檔時被丟掉
             merged.append(action.name)
+        if not added:
+            print(f"! {path.name} 裡沒有動作，跳過")
         for obj in [o for o in bpy.data.objects if o not in keep]:
             bpy.data.objects.remove(obj, do_unlink=True)
     return merged
@@ -516,17 +593,26 @@ def main():
           f"{len(meshes)} 個網格、{triangle_count(meshes):,} 三角面、"
           f"{len(bpy.data.actions)} 個動作")
 
+    taken = set()
     base_action = next(iter(bpy.data.actions), None)
     if base_action is not None:
-        base_action.name = animation_name(args.input.stem, base_action.name)
+        wanted = args.name[0] if args.name else ""
+        base_action.name = unique_name(wanted or animation_name(args.input.stem, base_action.name),
+                                       taken)
         base_action.use_fake_user = True
         print(f"動畫：{base_action.name}（來自 {args.input.name}）")
     if args.animation:
-        merged = collect_animations(armature, args.animation)
+        merged = collect_animations(armature, args.animation, taken, args.name[1:])
         print(f"併入動畫：{'、'.join(merged) if merged else '無'}")
 
     mapping = build_mapping(armature, args.map)
     rename_bones(armature, meshes, mapping)
+
+    # 改名之後才剝位移，這樣根骨一定叫 Hips，不必猜每個工具的命名。
+    if not args.keep_root_motion:
+        cleared = strip_root_motion(armature)
+        if cleared:
+            print(f"剝掉 {cleared} 條根骨水平位移曲線（TD-08；要保留用 --keep-root-motion）")
 
     extras = [b.name for b in armature.data.bones if guess_standard_name(b.name) is None]
     leaves = [b for b in extras if is_leaf_bone(b)]

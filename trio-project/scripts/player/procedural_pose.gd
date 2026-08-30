@@ -11,13 +11,9 @@ extends SkeletonModifier3D
 ## （Godot 4.3+ 專門為這件事加的節點）。用普通 Node 在 _process 裡改骨骼會跟動畫搶，
 ## 誰先誰後看節點順序，很難調。
 ##
-## 座標約定（重要，調參數時看這裡）：
-## 所有角度都是「角色空間」的尤拉角，單位是度，Vector3(X, Y, Z)：
-##   X 正 = 抬頭／後仰，X 負 = 低頭／前傾
-##   Y 正 = 向左轉
-##   Z 正 = 向角色的右手邊倒
-## 手臂張開因此是左臂 Z 負、右臂 Z 正。覺得方向相反就把正負號對調，
-## 這一層不依賴骨骼自己的朝向，換模型也不必重調軸向。
+## 座標約定與換算都在 bone_space.gd，生成動畫（motion_forge.gd）用的是同一份，
+## 姿勢資料才能兩邊通用。簡述：角色空間的尤拉角，X 正＝抬頭、Y 正＝向左轉、
+## Z 正＝往右手邊倒。
 
 ## 看向時三段骨骼分攤的比例。全部給頭會變成貓頭鷹。
 const LOOK_SHARE := {
@@ -60,8 +56,7 @@ var space: Node3D = null
 
 var _bones: Array[int] = []
 var _names: Array[StringName] = []
-var _frame: Array[Basis] = []
-var _frame_inv: Array[Basis] = []
+var _entries: Array[Dictionary] = []
 var _base: Array[Quaternion] = []
 var _written: Array[Quaternion] = []
 var _index: Dictionary = {}  # StringName -> 在上面幾個陣列裡的位置
@@ -140,19 +135,12 @@ func _process_modification() -> void:
 			_written[slot] = _base[slot]
 			continue
 
-		var spin := Basis.from_euler(
-			Vector3(deg_to_rad(euler.x), deg_to_rad(euler.y), deg_to_rad(euler.z))
-		)
-		var local := Quaternion(_frame_inv[slot] * spin * _frame[slot])
-		var result := (local * _base[slot]).normalized()
+		var result := (BoneSpace.local(_entries[slot], euler) * _base[slot]).normalized()
 		skeleton.set_bone_pose_rotation(index, result)
 		_written[slot] = result
 
 
-## 收集所有會用到的骨骼，並把「角色空間 -> 骨骼父空間」的換算先算好。
-##
-## 這個換算是常數：骨架是角色節點的子孫，兩者的相對關係不隨角色轉向改變，
-## 所以只算一次，每幀只剩兩次矩陣乘法。
+## 收集所有會用到的骨骼，換算矩陣交給 BoneSpace 算（只算一次）。
 func _build(skeleton: Skeleton3D) -> void:
 	var names: Array[StringName] = []
 	for key in LOOK_SHARE:
@@ -165,24 +153,16 @@ func _build(skeleton: Skeleton3D) -> void:
 		if not names.has(bone):
 			names.append(bone)
 
-	var relative := (
-		space.global_transform.basis.orthonormalized().inverse()
-		* skeleton.global_transform.basis.orthonormalized()
-	)
+	var frames := BoneSpace.frames(skeleton, space, names)
 	for bone in names:
-		var index := skeleton.find_bone(String(bone))
-		if index < 0:
+		if not frames.has(bone):
 			continue
-		var parent := skeleton.get_bone_parent(index)
-		var rest := Basis.IDENTITY
-		if parent >= 0:
-			rest = skeleton.get_bone_global_rest(parent).basis
-		var frame := (relative * rest).orthonormalized()
+		var entry: Dictionary = frames[bone]
+		var index := int(entry["index"])
 		_index[bone] = _bones.size()
 		_bones.append(index)
 		_names.append(bone)
-		_frame.append(frame)
-		_frame_inv.append(frame.inverse())
+		_entries.append(entry)
 		_base.append(skeleton.get_bone_pose_rotation(index))
 		_written.append(Quaternion.IDENTITY)  # 故意跟 _base 不同，第一幀會重新取基準
 	_ready_frames = not _bones.is_empty()

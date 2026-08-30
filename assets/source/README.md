@@ -16,6 +16,26 @@ assets/source/
   monster/
 ```
 
+### 一個角色可以有多個檔案
+
+`normalize-all` 取資料夾裡的**第一個檔案當底模**，其餘只取動作併進來
+（共用同一套 rig 才行——骨骼名稱要一致）：
+
+```
+assets/source/pig_warrior/
+  pig_warrior.glb        ← 底模
+  Walking.fbx            ← 以下只取動作
+  Running.fbx
+  Standing Idle.fbx
+```
+
+檔名決定動作名稱（`Walking` → `walk`、`Standing Idle` → `idle`）。
+Mixamo 下載時**務必勾 In Place**，否則位移會寫進 Hips 曲線，角色會自己往前飄。
+詳細設定見 [`docs/12-art-pipeline.md`](../../docs/12-art-pipeline.md)。
+
+攻擊、受擊、死亡不用下載——那幾支由程式生成，時間軸直接對齊 `CombatSpec`
+的判定窗口（TD-12）。
+
 ## 兩步驟
 
 ```
