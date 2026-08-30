@@ -103,7 +103,7 @@ func load_character(id: StringName) -> bool:
 
 	_cache_materials(bool(entry.get("alpha", false)))
 	_attach_pose(entry)
-	_fix_cull_bounds()
+	_fix_cull_bounds(float(entry.get("height", 1.8)))
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -225,7 +225,7 @@ func _relative_transform(node: Node3D) -> Transform3D:
 ## 用骨骼靜置範圍算出真實外框並明寫 custom_aabb。留 60% 餘裕給舉手過頭之類
 ## 超出靜置姿勢的動作。重跑美術管線把頂點寫回正常尺度之後，這一段會算出
 ## 幾乎一樣的結果，留著也不會有壞處。
-func _fix_cull_bounds() -> void:
+func _fix_cull_bounds(target_height: float) -> void:
 	if _skeleton == null:
 		return
 	var low := Vector3(INF, INF, INF)
@@ -252,6 +252,17 @@ func _fix_cull_bounds() -> void:
 		# 視錐剔除只有整個盒子離開畫面才會生效，LOD 卻是「在畫面裡但畫成空的」，
 		# 更符合「標籤看得到、人看不到」的症狀。兩個都堵起來。
 		mesh.lod_bias = 128.0
+		# 真正有效的那一個。custom_aabb 蓋不掉——骨架掛上去之後，引擎每幀會從
+		# 骨骼的外框重算實例的剖面盒，把我們設的值覆蓋掉。extra_cull_margin 是
+		# 加在「重算之後」的結果上，所以蓋得住，也正是 Godot 文件給這個情況
+		# （網格被骨架變形到超出自己的 AABB）開的藥。
+		#
+		# 實測（重跑正規化之後的資產）：幾何體 1.6000 公尺、剔除盒 0.0159 公尺。
+		# 差距來自 inverse bind 矩陣帶的 100 倍——網格座標系與骨骼座標系差 100 倍，
+		# 而剖面盒取的是網格座標系。這與資產尺寸無關，重跑管線也修不掉。
+		# 餘裕用「公尺」算，不要用骨架空間的單位——這個骨架一單位是 1 公分，
+		# 拿它乘出來會得到 1024 這種看不懂的數字。
+		mesh.extra_cull_margin = target_height * 4.0
 
 
 ## 把程序化姿態層掛到骨架底下。SkeletonModifier3D 必須是 Skeleton3D 的子節點，
