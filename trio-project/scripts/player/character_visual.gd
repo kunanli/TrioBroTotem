@@ -103,6 +103,7 @@ func load_character(id: StringName) -> bool:
 
 	_cache_materials(bool(entry.get("alpha", false)))
 	_attach_pose(entry)
+	_fix_cull_bounds()
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -143,7 +144,9 @@ func _fit_size(target_height: float) -> bool:
 	if absf(ratio - 1.0) <= SIZE_TOLERANCE:
 		return true
 	_model.scale *= ratio
-	push_warning(
+	# 用 print 不是只用 push_warning：push_warning 只進「偵錯器」分頁，
+	# 而大家看的是「輸出」分頁——訊息印在沒人看的地方等於沒印。
+	print(
 		(
 			"[Visual] %s 的模型實際只有 %.4f 公尺，名冊寫 %.2f 公尺，已在程式裡縮放 %.1f 倍補救。"
 			+ "正解是重跑美術管線：python tools/run_blender.py normalize-all"
@@ -207,6 +210,48 @@ func _relative_transform(node: Node3D) -> Transform3D:
 		result = walker.transform * result
 		walker = walker.get_parent() as Node3D
 	return result
+
+
+## 修正蒙皮網格的剔除範圍。
+##
+## 這是「角色明明是 1.6 公尺卻整個不畫」的真正原因。
+##
+## 匯出檔把頂點寫在 1/100 的尺度，再用 100 倍的 inverse bind 矩陣補回來
+## （實測：頂點外框 0.0150、bind_pose 尺度 100、蒙皮後 1.5046）。這在 glTF 裡
+## 合法，但 Godot 拿來做視錐剔除的是 mesh.get_aabb()，也就是**沒有蒙皮**的原始
+## 頂點範圍——比真正的幾何小 100 倍。引擎因此以為那是一個 1.6 公分的東西，
+## 鏡頭一移動、那個小盒子離開視錐，整隻角色就消失，而且不會有任何錯誤訊息。
+##
+## 用骨骼靜置範圍算出真實外框並明寫 custom_aabb。留 60% 餘裕給舉手過頭之類
+## 超出靜置姿勢的動作。重跑美術管線把頂點寫回正常尺度之後，這一段會算出
+## 幾乎一樣的結果，留著也不會有壞處。
+func _fix_cull_bounds() -> void:
+	if _skeleton == null:
+		return
+	var low := Vector3(INF, INF, INF)
+	var high := -low
+	for index in _skeleton.get_bone_count():
+		var point := _skeleton.get_bone_global_rest(index).origin
+		low = Vector3(minf(low.x, point.x), minf(low.y, point.y), minf(low.z, point.z))
+		high = Vector3(maxf(high.x, point.x), maxf(high.y, point.y), maxf(high.z, point.z))
+	if not (high.y > low.y):
+		return
+	var centre := (low + high) * 0.5
+	var size := (high - low) * 1.6
+	size = Vector3(maxf(size.x, size.y * 0.8), size.y, maxf(size.z, size.y * 0.8))
+
+	for node in _skeleton.find_children("*", "MeshInstance3D", true, false):
+		var mesh: MeshInstance3D = node
+		if mesh.skin == null:
+			continue
+		# custom_aabb 是網格自己的區域座標；網格掛在骨架底下，換算過去。
+		var to_local := mesh.transform.affine_inverse()
+		mesh.custom_aabb = AABB(to_local * (centre - size * 0.5), size)
+		# 剖面盒同時也是 LOD 的依據：1.6 公分的盒子在 5 公尺外，引擎算出來的
+		# 螢幕佔比幾乎是 0，會挑最粗的 LOD——粗到可能一個三角形都不畫。
+		# 視錐剔除只有整個盒子離開畫面才會生效，LOD 卻是「在畫面裡但畫成空的」，
+		# 更符合「標籤看得到、人看不到」的症狀。兩個都堵起來。
+		mesh.lod_bias = 128.0
 
 
 ## 把程序化姿態層掛到骨架底下。SkeletonModifier3D 必須是 Skeleton3D 的子節點，
