@@ -137,13 +137,23 @@ def unique_name(wanted, taken):
 
 
 def strip_root_motion(armature):
-    """剝掉 Hips 的水平位移（TD-08）。
+    """把根骨的位移曲線整個歸零（TD-08）。
 
-    Mixamo 下載時沒勾 In Place 的動作，位移是寫在 Hips 的 location 曲線裡的。
-    遊戲的移動由 CharacterBody3D 負責，動畫再帶一份位移的結果是角色自己往前飄，
-    而且沒有任何錯誤訊息——只有「怎麼走路會滑走」。
+    遊戲的移動由 CharacterBody3D 負責，動畫再帶一份位移就會打架。Mixamo 沒勾
+    In Place、以及 Meshy 直接生的走路動作，位移都寫在 Hips 的 location 曲線裡。
 
-    Y 軸保留：走路的上下起伏是動作的一部分，剝掉會變成滑行。
+    **三軸全部歸零，而且是歸零不是「壓成第一幀的值」。** 兩個理由：
+
+    1. 第一幀的值本身就含偏移。實測 Meshy 的 walking_man：Hips 靜置在
+       (0.34, 42.45, 12.79)，動畫卻把它帶到 Y = -516 ~ -972、Z = -329 ~ 34。
+       壓成第一幀等於把那個偏移留下來。
+    2. **零在縮放下不變。** export_verified() 會量產出檔、算出修正倍率、再呼叫
+       scale_rig() 重新縮放——而 scale_rig 會連 location 曲線一起乘。壓成常數的話
+       那個常數會被乘上 10600 倍，角色就被丟到地板下六公尺。歸零則怎麼乘都是零。
+
+    代價是失去走路的上下起伏。以目前的來源資料這不是損失——那個「起伏」是
+    4.6 公尺，對 1.6 公尺高的角色來說是壞資料，不是動作。真的需要就用
+    --keep-root-motion。
     """
     root = None
     for candidate in ("Hips", "mixamorig:Hips", "Pelvis", "Root"):
@@ -161,13 +171,12 @@ def strip_root_motion(armature):
     cleared = 0
     for action in bpy.data.actions:
         for curve in list(iter_fcurves(action)):
-            if curve.data_path != token or curve.array_index == 1:
-                continue  # 只動 X 與 Z
-            base = curve.evaluate(curve.keyframe_points[0].co[0]) if curve.keyframe_points else 0.0
+            if curve.data_path != token:
+                continue
             for point in curve.keyframe_points:
-                point.co[1] = base
-                point.handle_left[1] = base
-                point.handle_right[1] = base
+                point.co[1] = 0.0
+                point.handle_left[1] = 0.0
+                point.handle_right[1] = 0.0
             cleared += 1
     return cleared
 
@@ -612,7 +621,7 @@ def main():
     if not args.keep_root_motion:
         cleared = strip_root_motion(armature)
         if cleared:
-            print(f"剝掉 {cleared} 條根骨水平位移曲線（TD-08；要保留用 --keep-root-motion）")
+            print(f"根骨位移曲線歸零 {cleared} 條（TD-08；要保留用 --keep-root-motion）")
 
     extras = [b.name for b in armature.data.bones if guess_standard_name(b.name) is None]
     leaves = [b for b in extras if is_leaf_bone(b)]
