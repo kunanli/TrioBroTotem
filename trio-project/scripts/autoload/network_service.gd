@@ -79,6 +79,25 @@ func is_online() -> bool:
 	return mode != Mode.OFFLINE
 
 
+## 這台機器在區網裡的位址，給 host 唸給朋友聽。
+##
+## 沒有這個的話，開房之後畫面上沒有任何地方寫著「連這裡」——測試當下最常見的
+## 卡關就是「所以我要連什麼」。過濾掉 127.x 與 IPv6，只留看起來像區網的位址。
+func local_addresses() -> PackedStringArray:
+	var out := PackedStringArray()
+	for entry in IP.get_local_addresses():
+		var address: String = entry
+		if address.contains(":") or address.begins_with("127."):
+			continue
+		if (
+			address.begins_with("192.168.")
+			or address.begins_with("10.")
+			or address.begins_with("172.")
+		):
+			out.append(address)
+	return out
+
+
 func is_host() -> bool:
 	return mode == Mode.HOST
 
