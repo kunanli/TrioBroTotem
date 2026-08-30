@@ -105,4 +105,5 @@ func _spawn_player(data: Variant) -> Node:
 	var spawn_position: Vector3 = SPAWN_POINTS[slot.slot_id % SPAWN_POINTS.size()]
 	player.position = spawn_position
 	player.net_position = spawn_position
+	player.spawn_position = spawn_position
 	return player

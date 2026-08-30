@@ -20,6 +20,7 @@ const KEY_BINDINGS := {
 	"attack": [KEY_J],
 	"grab": [KEY_F],
 	"interact": [KEY_E],
+	"respawn": [KEY_R],
 	"debug_down": [KEY_K],
 }
 

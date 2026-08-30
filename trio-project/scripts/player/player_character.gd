@@ -132,6 +132,9 @@ var stacked_on: int = -1
 ## 是否倒地。由 host 透過 DownSystem 廣播寫入。
 var is_downed: bool = false
 
+## 由 main.gd 在生成時填。卡住重生（R）要回到這裡。
+var spawn_position: Vector3 = Vector3.ZERO
+
 # --- 被複製的狀態（權威端寫，其他人讀）---
 var net_position: Vector3 = Vector3.ZERO
 var net_velocity: Vector3 = Vector3.ZERO
@@ -320,7 +323,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if motion == null:
 		return
 	var looking := (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+			or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 	if looking:
 		_turn_camera(-motion.relative.x * MOUSE_SENSITIVITY, motion.relative.y * MOUSE_SENSITIVITY)
 
@@ -620,6 +624,10 @@ func _process_carry_input(delta: float) -> void:
 	if not is_carrying() and _intent.attack:
 		_attack.press(_attack_context())
 
+	if _intent.respawn:
+		DownSystem.request_respawn.rpc_id(1, slot_id)
+		return
+
 	if _intent.grab:
 		if is_carrying():
 			CarrySystem.request_drop.rpc_id(1, slot_id)
@@ -648,6 +656,23 @@ func on_downed(impulse: Vector3) -> void:
 	if not _character.start_ragdoll(impulse):
 		_visual.rotation.x = deg_to_rad(DOWNED_PITCH)
 		_character.play_action(&"death")
+
+
+## 由 DownSystem 呼叫。把人送回出生點並解除所有狀態。
+##
+## 要解得夠乾淨：卡住的人常常同時是「被抓著」或「疊在別人身上」，
+## 只搬位置的話下一幀又會被錨點拉回去。
+func respawn() -> void:
+	if StackSystem.is_stacked(slot_id):
+		StackSystem.detach(slot_id)
+	StackSystem.collapse_above(slot_id)
+	if carried_by_slot >= 0 and NetworkService.is_host():
+		CarrySystem.request_drop(carried_by_slot)
+	on_revived()
+	global_position = spawn_position
+	velocity = Vector3.ZERO
+	net_position = spawn_position
+	net_velocity = Vector3.ZERO
 
 
 func on_revived() -> void:

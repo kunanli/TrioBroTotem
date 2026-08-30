@@ -14,6 +14,10 @@ var grab := false
 var interact := false
 var throw_held := false
 
+## 卡住時把自己送回出生點。測試場一定會有人卡進地形或掉進縫裡，
+## 沒有這個鍵的話唯一的解法是重開遊戲——測試就中斷了。
+var respawn := false
+
 ## move 是否已經是世界座標。真人的輸入相對鏡頭，AI 沒有鏡頭，直接給世界方向。
 var world_move := false
 
@@ -25,6 +29,7 @@ func clear() -> void:
 	grab = false
 	interact = false
 	throw_held = false
+	respawn = false
 	world_move = false
 
 
@@ -37,4 +42,5 @@ func fill_from_input(device_id: int) -> void:
 	grab = GameInput.is_grab_pressed(device_id)
 	interact = GameInput.is_pressed(device_id, &"interact")
 	throw_held = GameInput.is_throw_held(device_id)
+	respawn = GameInput.is_just_pressed(device_id, &"respawn")
 	world_move = false

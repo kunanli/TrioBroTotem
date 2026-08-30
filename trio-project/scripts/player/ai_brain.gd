@@ -40,6 +40,13 @@ func think(me: PlayerCharacter, intent: PlayerIntent) -> void:
 	intent.world_move = true
 	_has_target = false
 
+	# 頭上有人就站住。docs/08 寫了「疊高時自動就位＝站著不動讓人踩」，
+	# 但先前沒有實作——AI 會扛著你跑去追泥偶，塔還沒疊完就散了。
+	# 兩個真人加一個 AI 想上高台時，這是唯一可行的組合。
+	if StackSystem.rider_of(me.slot_id) >= 0:
+		_was_moving = false
+		return
+
 	if not _try_revive(me, intent):
 		if not _try_fight(me, intent):
 			_follow(me)

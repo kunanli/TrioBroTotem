@@ -10,6 +10,7 @@ const STACK_TARGET := 30.0
 
 var _status: Label
 var _objective: Label
+var _name: LineEdit
 var _slots: Label
 var _stack_best: float = 0.0
 var _stack_now: float = 0.0
@@ -52,6 +53,14 @@ func _build() -> void:
 	_objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_objective)
 
+	# 名字要能自己填。預設是 Player-483 這種亂數，回報問題時
+	# 「Player-483 疊在我身上」對誰都沒有意義。
+	_name = LineEdit.new()
+	_name.text = PlayerRegistry.local_display_name
+	_name.placeholder_text = "你的名字"
+	_name.max_length = 12
+	box.add_child(_name)
+
 	_address = LineEdit.new()
 	_address.text = NetworkService.DEFAULT_ADDRESS
 	_address.placeholder_text = "host 位址"
@@ -81,10 +90,11 @@ func _build() -> void:
 
 	var hint := Label.new()
 	hint.text = (
-		"WASD 移動｜滑鼠右鍵拖曳轉鏡頭｜空白鍵跳\n"
-		+ "E 抓起／放下｜按住 F 蓄力，放開投擲\n"
-		+ "滑鼠左鍵攻擊（連按三下接連擊）｜走到隊友身上疊高\n"
-		+ "按住 E 靠近倒地的隊友＝扶起"
+		"WASD 移動｜空白鍵跳｜Tab 切換滑鼠轉視角\n"
+		+ "F 抓起／放下｜抓著東西時按住攻擊鍵蓄力，放開丟出\n"
+		+ "J 或滑鼠左鍵 攻擊（連按三下接連擊）\n"
+		+ "E 互動／按住扶起倒地的隊友｜走到隊友身上疊高\n"
+		+ "R 卡住時回出生點"
 	)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(hint)
@@ -93,15 +103,41 @@ func _build() -> void:
 
 
 func _on_host_pressed() -> void:
+	_commit_name()
 	NetworkService.host_game()
 
 
 func _on_join_pressed() -> void:
+	_commit_name()
 	NetworkService.join_game(_address.text)
+
+
+## 名字要在連線之前定案——PlayerRegistry 是在開房／報到的當下讀它的。
+func _commit_name() -> void:
+	var wanted := _name.text.strip_edges()
+	if not wanted.is_empty():
+		PlayerRegistry.local_display_name = wanted
 
 
 func _on_leave_pressed() -> void:
 	NetworkService.leave()
+
+
+## Tab 切換滑鼠鎖定。
+##
+## 原本轉視角要一直按著滑鼠右鍵，玩一小時手會廢。鎖定之後移動滑鼠就是轉視角，
+## 但那樣按不到大廳的按鈕，所以要能切回來。切換前先放掉輸入框的焦點，
+## 否則 Tab 會被當成「跳到下一個欄位」。
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and event.keycode == KEY_TAB):
+		return
+	if _name != null:
+		_name.release_focus()
+	if _address != null:
+		_address.release_focus()
+	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if captured else Input.MOUSE_MODE_CAPTURED
+	get_viewport().set_input_as_handled()
 
 
 func _on_join_failed(_reason: String) -> void:
@@ -157,6 +193,7 @@ func _refresh() -> void:
 	_join_button.disabled = online
 	_leave_button.disabled = not online
 	_address.editable = not online
+	_name.editable = not online
 
 	# 用 if/elif 而不是 match：autoload 上的 enum 成員不是常數運算式，
 	# 當 match 的 pattern 會被剖析器拒絕。

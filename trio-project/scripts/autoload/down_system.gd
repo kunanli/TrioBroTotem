@@ -95,6 +95,27 @@ func request_revive(slot_id: int, target_slot: int) -> void:
 
 
 ## 測試用：把自己打倒。M0 還沒有敵人，沒有這個就驗不了倒地與救援。
+## 卡住時把自己送回出生點。
+##
+## 測試場一定會有人卡進地形、掉進縫裡、或被丟到回不來的地方。沒有這個鍵，
+## 唯一的解法是重開遊戲，那等於測試中斷。順便把血補滿並解除倒地——
+## 目的是「讓人繼續玩」，不是懲罰。
+@rpc("any_peer", "call_local", "reliable")
+func request_respawn(slot_id: int) -> void:
+	if not _authorised(slot_id):
+		return
+	_apply_respawn.rpc(slot_id)
+
+
+@rpc("authority", "call_local", "reliable")
+func _apply_respawn(slot_id: int) -> void:
+	_downed[slot_id] = false
+	_health[slot_id] = MAX_HEALTH
+	var player := CarrySystem.find_player(slot_id)
+	if player != null and player.has_method("respawn"):
+		player.respawn()
+
+
 @rpc("any_peer", "call_local", "reliable")
 func request_debug_knockdown(slot_id: int) -> void:
 	if not _authorised(slot_id):
