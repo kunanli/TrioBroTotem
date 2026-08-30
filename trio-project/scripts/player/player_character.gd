@@ -57,6 +57,9 @@ const FALL_DAMAGE_PER_SPEED := 9.0
 ## 扶起隊友要按住多久（與 DownSystem.REVIVE_TIME 對齊）。
 const REVIVE_RANGE := 2.2
 
+## 頭部看向的偵測半徑。超過這個距離就不轉頭了——遠處的隊友不值得一直盯著。
+const LOOK_RANGE := 9.0
+
 ## 倒地時模型往前趴的角度。這是 ragdoll 的暫代表現——
 ## 真正的 PhysicalBone3D 是下一步，先把網路模型驗起來（TD-06）。
 const DOWNED_PITCH := -80.0
@@ -383,7 +386,49 @@ func _physics_process(delta: float) -> void:
 		_process_remote(delta)
 	_visual.rotation.y = _yaw
 	_character.drive(0.0 if is_downed else Vector3(velocity.x, 0.0, velocity.z).length())
+	_update_look_target()
 	_update_label()
+
+
+## 挑一個看向的目標餵給程序化姿態層：有敵人先看敵人，沒有就看最近的隊友。
+##
+## 純表演，所以不同步也不分權威——每台機器各自算，位置本來就是同步的，
+## 算出來的結果一致，不值得為了轉頭再開一條網路欄位。
+func _update_look_target() -> void:
+	if is_downed:
+		_character.clear_look_target()
+		return
+
+	var target: Node3D = null
+	var best := LOOK_RANGE
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy: Node3D = node
+		if enemy.get("is_broken") == true:
+			continue
+		var distance := global_position.distance_to(enemy.global_position)
+		if distance < best:
+			best = distance
+			target = enemy
+
+	if target == null:
+		best = LOOK_RANGE
+		for node in get_tree().get_nodes_in_group("player_characters"):
+			var other: PlayerCharacter = node
+			if other == self:
+				continue
+			var distance := global_position.distance_to(other.global_position)
+			if distance < best:
+				best = distance
+				target = other
+
+	if target == null:
+		_character.clear_look_target()
+	else:
+		# 看對方的頭，不是腳底——看腳底會變成全隊一直低頭。
+		var lift := character_height * 0.55
+		if target is PlayerCharacter:
+			lift = (target as PlayerCharacter).character_height * 0.55
+		_character.set_look_target(target.global_position + Vector3.UP * lift)
 
 
 func _process_authority(delta: float) -> void:

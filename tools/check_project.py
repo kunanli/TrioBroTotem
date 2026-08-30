@@ -223,6 +223,56 @@ def check_with_godot():
     notes.append("Godot 執行檔無法用 --import 或 --editor --quit 執行，跳過")
 
 
+def check_model_sizes():
+    """名冊寫的身高 vs GLB 裡骨架的真實高度。
+
+    這是 2026-08 那次「連上線但看不到人物」漏掉的關卡：模型被匯出成 1.5 公分高，
+    程式照樣判定載入成功、把膠囊備援收起來，畫面上只剩名字標籤浮在空中。
+    引擎端現在會縮放補救並警告，但錯誤的資產不該進 repo，所以在這裡也擋一次。
+    """
+    roster = PROJECT / "scripts/core/character_roster.gd"
+    if not roster.exists():
+        return
+    try:
+        from inspect_model import gltf_skeleton_height
+    except ImportError:
+        notes.append("inspect_model.py 不在同一個資料夾，跳過模型尺寸檢查")
+        return
+
+    text = roster.read_text(encoding="utf-8")
+    entries = re.findall(
+        r'"model":\s*"([^"]+)".*?"height":\s*([0-9.]+)', text, re.DOTALL
+    )
+    if not entries:
+        notes.append("character_roster.gd 裡沒有讀到角色，跳過模型尺寸檢查")
+        return
+
+    checked = 0
+    for res, height in entries:
+        model = res_to_path(res)
+        if not model.exists():
+            problems.append(f"名冊指到的模型不存在：{res}")
+            continue
+        try:
+            actual = gltf_skeleton_height(model)
+        except Exception as error:  # 壞掉的 GLB 也是問題，但要說得清楚
+            problems.append(f"{model.relative_to(ROOT)} 讀不出骨架高度：{error}")
+            continue
+        wanted = float(height)
+        if actual <= 0.0:
+            notes.append(f"{model.name} 沒有骨架，跳過尺寸比對")
+            continue
+        if abs(actual - wanted) > wanted * 0.3:
+            problems.append(
+                f"{model.relative_to(ROOT)} 骨架高 {actual:.4f} 公尺，"
+                f"名冊寫 {wanted:.2f} 公尺。重跑美術管線："
+                f"python tools/run_blender.py normalize-all"
+            )
+        checked += 1
+    if checked:
+        notes.append(f"比對了 {checked} 個角色模型的尺寸")
+
+
 def check_wiring():
     """接線檢查（節點路徑、autoload 成員、RPC 標註、訊號、群組）。"""
     try:
@@ -239,6 +289,7 @@ def main():
     check_project_settings()
     check_scenes()
     run_optional(check_indentation())
+    check_model_sizes()
     check_wiring()
     check_with_godot()
 

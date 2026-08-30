@@ -1,6 +1,12 @@
 # Godot 4
 .godot/
 /android/
+
+# Godot 4.4+ 會替每個腳本產生 .uid。官方建議進版控，但這個專案的場景一律用
+# res:// 路徑引用（沒有任何一個 uid://），所以 uid 沒有作用；而不同機器各自
+# 產生的 uid 內容不同，進了版控只會在每次 pull 時打架。等到哪天真的用上
+# uid:// 引用再改回來。
+*.uid
 export_presets.cfg
 *.translation
 

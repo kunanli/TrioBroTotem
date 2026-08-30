@@ -38,7 +38,12 @@ GODOT_PREFIXES = (
     "KEY_", "JOY_", "MOUSE_", "PROPERTY_", "ERR_", "TYPE_", "METHOD_",
     "NOTIFICATION_", "CORNER_", "SIDE_", "HORIZONTAL_", "VERTICAL_", "OP_",
 )
-GODOT_GLOBALS = {"INF", "NAN", "PI", "TAU", "OK", "FAILED", "TRUE", "FALSE", "SIZE"}
+# 引擎自己的全大寫識別字。AABB、RID、JSON 這些是「型別」不是常數，
+# 但長得跟常數一模一樣，不列出來就會被誤判成沒宣告。
+GODOT_GLOBALS = {
+    "INF", "NAN", "PI", "TAU", "OK", "FAILED", "TRUE", "FALSE", "SIZE",
+    "AABB", "RID", "JSON", "XML", "TLS", "UDP", "TCP", "URL", "UID",
+}
 
 
 def parse_scene(path):
@@ -87,6 +92,15 @@ def script_members(text):
 def rpc_methods(text):
     """有 @rpc 標註的函式名。"""
     return set(re.findall(r"@rpc\([^)]*\)\s*\n\s*func\s+(\w+)", text))
+
+
+def local_rpc_methods(text):
+    """@rpc 標註裡有 call_local 的函式名。"""
+    found = set()
+    for flags, name in re.findall(r"@rpc\(([^)]*)\)\s*\n\s*func\s+(\w+)", text):
+        if "call_local" in flags:
+            found.add(name)
+    return found
 
 
 def signals(text):
@@ -172,7 +186,28 @@ def run(root):
                     f"{script.relative_to(root)}: 對 {where}.{method} 呼叫 .rpc()，"
                     f"但該函式沒有 @rpc 標註"
                 )
-    notes.append(f"RPC：檢查了 {rpc_calls} 處呼叫")
+
+    # rpc_id(1, …) 是「送給 host」。host 自己也會走這條路，那時就是
+    # rpc_id(自己)，Godot 只在 @rpc 有 call_local 時才允許，否則整包丟掉並印
+    # "RPC 'x' on yourself is not allowed by selected mode"。
+    # 結果是：客戶端一切正常，host 玩家的抓取、投擲、疊高、救人、命中全部無聲失效。
+    # 實際踩過（2026-08，headless 跑 25 秒噴了 185 次）。
+    self_calls = 0
+    for script, text in script_text.items():
+        for obj, method in re.findall(r"(?:\b(\w+)\.)?(\w+)\.rpc_id\(\s*1\s*,", text):
+            self_calls += 1
+            if obj in autoload_text:
+                target_text, where = autoload_text[obj], obj
+            elif obj in ("", "self", None):
+                target_text, where = text, script.name
+            else:
+                continue
+            if method in rpc_methods(target_text) and method not in local_rpc_methods(target_text):
+                problems.append(
+                    f"{script.relative_to(root)}: {where}.{method} 用 rpc_id(1, …) 呼叫，"
+                    f"但 @rpc 沒有 call_local——host 自己呼叫時會被引擎丟掉"
+                )
+    notes.append(f"RPC：檢查了 {rpc_calls} 處呼叫，其中 {self_calls} 處送給 host")
 
     # --- 4. connect ---
     connects = 0

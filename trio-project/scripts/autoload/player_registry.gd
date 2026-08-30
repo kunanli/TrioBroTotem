@@ -150,15 +150,24 @@ func _broadcast() -> void:
 # --- RPC --------------------------------------------------------------------
 
 ## 客戶端 → host。host 是唯一能決定 slot 歸屬的人。
-@rpc("any_peer", "reliable")
+##
+## 今天只有客戶端會呼叫（_on_joined 只在客戶端觸發），但還是照 host 也會呼叫
+## 來寫：rpc_id(1) 從 host 送出時是本地呼叫，沒有 call_local 會被引擎整包丟掉，
+## 而且 sender 會是 0。全案的 request_* 統一成這個形狀，就不必記哪一條是例外。
+@rpc("any_peer", "call_local", "reliable")
 func _request_register(display_name: String, device_id: int) -> void:
 	if not NetworkService.is_host():
 		return
 	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = 1  # host 自己呼叫
 	if not slots_for_peer(sender).is_empty():
 		return  # 重複報到，忽略
 	if not _host_claim_slot(sender, display_name, device_id):
-		_reject.rpc_id(sender, "隊伍已滿（上限 %d 人）" % PlayerSlot.MAX_SLOTS)
+		if sender == 1:
+			push_warning("[Registry] 隊伍已滿，host 自己也擠不進去")
+		else:
+			_reject.rpc_id(sender, "隊伍已滿（上限 %d 人）" % PlayerSlot.MAX_SLOTS)
 
 
 ## host → 全體。call_local 讓 host 自己也走同一條路徑，避免兩套邏輯。

@@ -55,7 +55,7 @@ func held_carryable(slot_id: int) -> Carryable:
 
 # --- 客戶端送出的請求（host 才會處理）--------------------------------------
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_grab(slot_id: int) -> void:
 	if not _is_authorised(slot_id):
 		return
@@ -72,14 +72,14 @@ func request_grab(slot_id: int) -> void:
 	_apply_grab.rpc(slot_id, str(target.get_path()))
 
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_drop(slot_id: int) -> void:
 	if not _is_authorised(slot_id):
 		return
 	_release(slot_id, Vector3.ZERO)
 
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_throw(slot_id: int, charge: float) -> void:
 	if not _is_authorised(slot_id):
 		return
@@ -91,7 +91,7 @@ func request_throw(slot_id: int, charge: float) -> void:
 
 
 ## 被抓的人掙脫。掙扎的累積在被抓者自己那端算，這裡只確認他真的正被這個人抓著。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_struggle_break(holder_slot: int) -> void:
 	if not NetworkService.is_host():
 		return

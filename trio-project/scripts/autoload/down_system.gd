@@ -68,7 +68,7 @@ func _tick_wipe(delta: float) -> void:
 # --- 客戶端送出的請求 -------------------------------------------------------
 
 ## 落地傷害。速度由自己這端量，host 夾住範圍——蓄力投擲也是同一個處理方式。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_fall_damage(slot_id: int, impact_speed: float) -> void:
 	if not _authorised(slot_id) or is_downed(slot_id):
 		return
@@ -79,7 +79,7 @@ func request_fall_damage(slot_id: int, impact_speed: float) -> void:
 
 
 ## 扶起。累積在扶的人那端算，滿了才送一次請求——每幀送會是 120 packets/s。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_revive(slot_id: int, target_slot: int) -> void:
 	if not _authorised(slot_id) or is_downed(slot_id):
 		return
@@ -95,7 +95,7 @@ func request_revive(slot_id: int, target_slot: int) -> void:
 
 
 ## 測試用：把自己打倒。M0 還沒有敵人，沒有這個就驗不了倒地與救援。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_debug_knockdown(slot_id: int) -> void:
 	if not _authorised(slot_id):
 		return

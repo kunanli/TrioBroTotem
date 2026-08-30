@@ -24,7 +24,7 @@ func _on_disconnected() -> void:
 
 ## 攻擊者回報命中。spec 只傳索引與種類，數值一律由 host 從 CombatSpec 查，
 ## 免得客戶端送個超大傷害過來。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func report_hit(attacker_slot: int, victim_path: String, damage: float, knockback: float) -> void:
 	if not NetworkService.is_host():
 		return
@@ -69,7 +69,7 @@ func _apply_hit(victim_path: String, damage: float, impulse: Vector3) -> void:
 		victim.take_hit(damage, impulse)
 
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_friendly_fire(enabled: bool) -> void:
 	if not NetworkService.is_host():
 		return

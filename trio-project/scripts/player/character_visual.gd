@@ -7,10 +7,28 @@ extends Node3D
 ## AnimationTree 要在編輯器裡拉狀態機，現階段的需求（待機／移動／單次動作）
 ## 用 play(名稱, 混合時間) 就夠了，而且看得懂、改得動。
 ## 等到需要 BlendSpace 混合方向與速度時再升級（M1）。
+##
+## 站著不動的「活著的感覺」不在這裡，在 ProceduralPose——因為模型根本沒有
+## idle 動畫。這裡負責把那一層掛上去並餵它移動速度與看向目標。
 
-## 動畫名稱由美術管線正規化（見 tools/blender_normalize.py 的 ANIMATION_NAMES），
-## 所以這裡可以直接寫死名稱，不必處理 Meshy 那串原始字串。
-const LOCOMOTION := [&"idle", &"walk", &"run"]
+## 邏輯動畫名稱，以及在模型裡找不到精確名稱時用來比對的關鍵字。
+##
+## 美術管線（tools/blender_normalize.py）本來就會把動畫改名成 idle/walk/...，
+## 但只要管線沒跑、跑壞、或以後換了生成工具，模型帶進來的就會是
+## "Armature|Armature|Armature|walking_man|baselayer" 這種字串。
+## 硬吃精確名稱的話，角色會變成一動也不動的雕像，而且不會有任何錯誤訊息。
+## 這張表讓兩種情況都能動，不必為了管線的 bug 再改一次程式。
+const CLIP_ALIASES := {
+	&"idle": ["idle", "stand", "breath"],
+	&"walk": ["walk"],
+	&"run": ["run", "sprint", "jog"],
+	&"attack": ["attack", "punch", "slash", "swing"],
+	&"hurt": ["hurt", "damage", "flinch"],
+	&"death": ["death", "die", "dead"],
+	&"carry": ["carry", "lift", "hold"],
+}
+
+const LOCOMOTION: Array[StringName] = [&"idle", &"walk", &"run"]
 
 ## 切換動畫的交叉淡入時間。太短會有跳動，太長會拖。
 const BLEND_TIME := 0.15
@@ -23,6 +41,9 @@ const SPEED_SCALE_RANGE := Vector2(0.6, 1.8)
 
 ## 低於這個速度算站著不動。
 const IDLE_SPEED := 0.15
+
+## 模型實際高度與名冊身高容許的落差。超過就在程式裡縮放補救。
+const SIZE_TOLERANCE := 0.25
 
 var character_id: StringName = &""
 
@@ -39,7 +60,14 @@ var _freeze_timer: float = 0.0
 
 var _player: AnimationPlayer = null
 var _model: Node3D = null
+var _pose: ProceduralPose = null
 var _action: StringName = &""
+
+## 邏輯名稱 -> 模型裡真正的動畫名稱。
+var _clips: Dictionary = {}
+
+## 沒有 idle 動畫時，走路動畫要停在哪一秒。
+var _idle_hold := 0.0
 
 
 ## 回傳是否成功載入模型。失敗時呼叫端應該保留膠囊當備援。
@@ -59,22 +87,172 @@ func load_character(id: StringName) -> bool:
 	_model.rotation.y = deg_to_rad(float(entry.get("yaw_offset", 0.0)))
 	add_child(_model)
 
-	_cache_materials()
+	if not _fit_size(float(entry.get("height", 1.8))):
+		_model.queue_free()
+		_model = null
+		return false
+
+	_cache_materials(bool(entry.get("alpha", false)))
+	_attach_pose(entry)
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
 		push_warning("[Visual] %s 裡沒有 AnimationPlayer——模型沒有動畫" % id)
 		return true
 
+	_resolve_clips()
 	# 匯入的動畫預設不循環，移動類的要自己打開，否則走一步就停住。
-	for name in LOCOMOTION:
-		if _player.has_animation(name):
-			_player.get_animation(name).loop_mode = Animation.LOOP_LINEAR
+	for logical in LOCOMOTION:
+		var clip := _clip(logical)
+		if clip != &"":
+			_player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+	_idle_hold = _hold_time(float(entry.get("idle_hold", 0.0)))
 	_player.animation_finished.connect(_on_animation_finished)
 	return true
 
 
-func _cache_materials() -> void:
+## 量模型的真實外框，跟名冊身高對不上就縮放補救。
+##
+## 為什麼要有這一關：Meshy 的匯出單位不固定，管線沒跑或跑壞就會出現
+## 只有 1.5 公分高的角色。那種模型「載入成功」，膠囊備援被收起來，
+## 畫面上只剩名字標籤浮在空中——完全看不出是哪裡壞了。
+##
+## 選擇縮放而不是直接判失敗，是因為這樣遊戲當下就能玩；warning 會一直喊，
+## 錯誤不會靜靜溜過去。正解仍然是重跑 tools/run_blender.py normalize-all。
+func _fit_size(target_height: float) -> bool:
+	var actual := _measure_height()
+	if actual <= 0.0001:
+		push_warning("[Visual] %s 量不到尺寸，保留膠囊" % character_id)
+		return false
+	var ratio := target_height / actual
+	if absf(ratio - 1.0) <= SIZE_TOLERANCE:
+		return true
+	_model.scale *= ratio
+	push_warning(
+		(
+			"[Visual] %s 的模型實際只有 %.4f 公尺，名冊寫 %.2f 公尺，已在程式裡縮放 %.1f 倍補救。"
+			+ "正解是重跑美術管線：python tools/run_blender.py normalize-all"
+		)
+		% [character_id, actual, target_height, ratio]
+	)
+	return true
+
+
+## 模型的實際高度（公尺）。
+##
+## 量骨架的靜置姿勢，不是量網格外框：
+##  - 這跟 tools/inspect_model.py 的 gltf_skeleton_height() 算的是同一個東西，
+##    也是美術管線 --target-height 實際套用的對象，三邊的數字才對得起來。
+##  - 蒙皮網格的 get_aabb() 是綁定空間的範圍，跟節點縮放的關係不直觀，
+##    量出來的數字會差好幾個數量級（實測過）。
+## 沒有骨架的模型（道具之類）才退回量網格。
+func _measure_height() -> float:
+	var skeletons := _model.find_children("*", "Skeleton3D", true, false)
+	if not skeletons.is_empty():
+		var skeleton: Skeleton3D = skeletons[0]
+		var count := skeleton.get_bone_count()
+		if count > 0:
+			var to_model := _relative_transform(skeleton)
+			var low := INF
+			var high := -INF
+			for index in count:
+				var y := (to_model * skeleton.get_bone_global_rest(index).origin).y
+				low = minf(low, y)
+				high = maxf(high, y)
+			if high > low:
+				return high - low
+	return _model_aabb().size.y
+
+
+## 模型底下所有網格的合併外框，換算回模型自己的座標系。
+##
+## 用逐層相乘而不是 global_transform：這個函式在 add_child() 之後馬上被呼叫，
+## global_transform 需要節點已經在場景樹裡，時機一有變動就會噴
+## "Condition !is_inside_tree()" 然後回傳單位矩陣，量出來的尺寸全錯。
+## 相對變換不依賴場景樹，什麼時候呼叫都對。
+func _model_aabb() -> AABB:
+	var box := AABB()
+	var started := false
+	for node in _model.find_children("*", "MeshInstance3D"):
+		var mesh: MeshInstance3D = node
+		var piece := _relative_transform(mesh) * mesh.get_aabb()
+		if started:
+			box = box.merge(piece)
+		else:
+			box = piece
+			started = true
+	return box
+
+
+## node 相對於 _model 的變換，沿著父節點一路乘上去。
+func _relative_transform(node: Node3D) -> Transform3D:
+	var result := Transform3D.IDENTITY
+	var walker: Node3D = node
+	while walker != null and walker != _model:
+		result = walker.transform * result
+		walker = walker.get_parent() as Node3D
+	return result
+
+
+## 把程序化姿態層掛到骨架底下。SkeletonModifier3D 必須是 Skeleton3D 的子節點，
+## 引擎才會在動畫寫完姿勢之後呼叫它。
+func _attach_pose(entry: Dictionary) -> void:
+	var skeletons := _model.find_children("*", "Skeleton3D", true, false)
+	if skeletons.is_empty():
+		push_warning("[Visual] %s 沒有 Skeleton3D，跳過程序化姿態" % character_id)
+		return
+	var skeleton: Skeleton3D = skeletons[0]
+	_pose = ProceduralPose.new()
+	_pose.name = "ProceduralPose"
+	_pose.configure(entry, self)
+	skeleton.add_child(_pose)
+
+
+## 建立「邏輯名稱 -> 模型裡真正的動畫名稱」。先找精確名稱，再退回關鍵字比對。
+func _resolve_clips() -> void:
+	_clips.clear()
+	var list := _player.get_animation_list()
+	for key in CLIP_ALIASES:
+		var logical: StringName = key
+		if _player.has_animation(logical):
+			_clips[logical] = logical
+			continue
+		var keywords: Array = CLIP_ALIASES[logical]
+		for item in list:
+			var actual: String = item
+			var lowered := actual.to_lower()
+			for keyword in keywords:
+				if lowered.contains(String(keyword)):
+					_clips[logical] = StringName(actual)
+					break
+			if _clips.has(logical):
+				break
+
+
+func _clip(logical: StringName) -> StringName:
+	return _clips.get(logical, &"")
+
+
+## 沒有 idle 時要停在走路動畫的哪一秒。ratio 是 0 到 1 的片段比例。
+func _hold_time(ratio: float) -> float:
+	var walk := _clip(&"walk")
+	if walk == &"":
+		return 0.0
+	return _player.get_animation(walk).length * clampf(ratio, 0.0, 1.0)
+
+
+## 複製一份材質給這隻角色用，順便把不該有的半透明關掉。
+##
+## Meshy 匯出的 glTF 材質一律是 alphaMode: BLEND，Godot 匯入後變成
+## TRANSPARENCY_ALPHA_DEPTH_PRE_PASS。但三張貼圖的 alpha 通道全是 1.0
+## （實測最小 0.992），根本沒有半透明的內容。留著只有壞處：要逐物件排序、
+## 排序錯了整片消失、陰影與深度都要多跑一遍。角色是實心的，關掉。
+##
+## cull_mode 保持匯入時的雙面，不去動它——關背面剔除頂多多畫幾個三角形，
+## 開錯了卻會讓單面的耳朵、毛髮之類整片不見。
+##
+## 真的需要 alpha 的角色（毛髮卡片、玻璃）在名冊裡寫 "alpha": true。
+func _cache_materials(keep_alpha: bool) -> void:
 	for node in _model.find_children("*", "MeshInstance3D"):
 		var mesh: MeshInstance3D = node
 		for surface in mesh.get_surface_override_material_count():
@@ -82,6 +260,8 @@ func _cache_materials() -> void:
 			if source == null:
 				continue
 			var copy: StandardMaterial3D = source.duplicate()
+			if not keep_alpha and copy.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+				copy.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
 			mesh.set_surface_override_material(surface, copy)
 			_materials.append(copy)
 
@@ -116,44 +296,81 @@ func available() -> PackedStringArray:
 	return _player.get_animation_list() if _player else PackedStringArray()
 
 
+## 看向目標（世界座標）。純表演，不同步——三台機器的角色位置本來就一致，
+## 各自算的結果一樣，不值得占頻寬。
+func set_look_target(point: Vector3) -> void:
+	if _pose != null:
+		_pose.set_look_target(point)
+
+
+func clear_look_target() -> void:
+	if _pose != null:
+		_pose.clear_look_target()
+
+
 ## 依水平速度選待機或移動。單次動作播放中時不打斷它。
 func drive(speed: float) -> void:
+	if _pose != null:
+		_pose.set_motion(speed / WALK_REFERENCE_SPEED)
 	if _player == null or _action != &"" or _freeze_timer > 0.0:
 		return
-	var wanted := _locomotion_for(speed)
+
+	if speed < IDLE_SPEED:
+		_stand()
+		return
+
+	var wanted := _clip(&"run") if speed > WALK_REFERENCE_SPEED * 1.6 else &""
+	if wanted == &"":
+		wanted = _clip(&"walk")
 	if wanted == &"":
 		return
 	if _player.current_animation != String(wanted):
 		_player.play(wanted, BLEND_TIME)
-	if wanted != &"idle":
-		_player.speed_scale = clampf(
-			speed / WALK_REFERENCE_SPEED, SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
-		)
-	else:
+	elif not _player.is_playing():
+		_player.play(wanted)  # 從站姿的暫停狀態恢復
+	_player.speed_scale = clampf(
+		speed / WALK_REFERENCE_SPEED, SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
+	)
+
+
+## 站著不動。有 idle 就播 idle；沒有就把走路停在一幀，剩下的交給 ProceduralPose。
+##
+## 舊版在這裡什麼都不做，結果走路動畫會繼續播——站著原地滑步。
+## 也不能用 stop()：那會回到 rest pose，多半是張開手的 T-pose。
+func _stand() -> void:
+	var idle := _clip(&"idle")
+	if idle != &"":
+		if _player.current_animation != String(idle):
+			_player.play(idle, BLEND_TIME)
 		_player.speed_scale = 1.0
+		return
+
+	var walk := _clip(&"walk")
+	if walk == &"":
+		return
+	if _player.current_animation != String(walk):
+		_player.play(walk, BLEND_TIME)
+	if _player.is_playing():
+		_player.speed_scale = 1.0
+		_player.seek(_idle_hold, true)
+		_player.pause()
 
 
 ## 播一次就回到移動狀態的動作（攻擊、受擊等）。
-func play_action(name: StringName) -> bool:
-	if _player == null or not _player.has_animation(name):
+func play_action(logical: StringName) -> bool:
+	var clip := _clip(logical)
+	if _player == null or clip == &"":
 		return false
-	_action = name
+	_action = clip
 	_player.speed_scale = 1.0
-	_player.play(name, BLEND_TIME)
+	_player.play(clip, BLEND_TIME)
+	if _pose != null:
+		_pose.set_acting(true)
 	return true
 
 
-func _locomotion_for(speed: float) -> StringName:
-	if speed < IDLE_SPEED:
-		# 沒有 idle 就退回停在移動動畫的第一幀，總比整個不動好。
-		return &"idle" if _player.has_animation(&"idle") else &""
-	if speed > WALK_REFERENCE_SPEED * 1.6 and _player.has_animation(&"run"):
-		return &"run"
-	if _player.has_animation(&"walk"):
-		return &"walk"
-	return &""
-
-
-func _on_animation_finished(name: StringName) -> void:
-	if name == _action:
+func _on_animation_finished(finished: StringName) -> void:
+	if finished == _action:
 		_action = &""
+		if _pose != null:
+			_pose.set_acting(false)

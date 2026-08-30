@@ -69,7 +69,7 @@ func _reclaim_orphans() -> void:
 
 ## 疊高不佔按鍵（docs/06）：走到隊友頭上就自動吸附。
 ## 客戶端偵測到腳下踩著人時送這個請求，host 再驗一次。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_stack(slot_id: int, target_slot: int) -> void:
 	if not _authorised(slot_id):
 		return
@@ -81,7 +81,7 @@ func request_stack(slot_id: int, target_slot: int) -> void:
 
 
 ## 上層按跳鍵自己下來（docs/06：按跳鍵下來）。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_dismount(slot_id: int) -> void:
 	if not _authorised(slot_id):
 		return
@@ -91,7 +91,7 @@ func request_dismount(slot_id: int) -> void:
 
 
 ## 底層跳躍或受擊 → 整柱潰散（docs/04）。
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_collapse(slot_id: int) -> void:
 	if not _authorised(slot_id):
 		return
