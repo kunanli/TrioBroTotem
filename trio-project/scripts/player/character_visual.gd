@@ -71,6 +71,7 @@ var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
 var _ragdoll: PhysicalBoneSimulator3D = null
+var _recovery: RagdollRecovery = null
 var _action: StringName = &""
 
 ## 邏輯名稱 -> 模型裡真正的動畫名稱。
@@ -78,6 +79,13 @@ var _clips: Dictionary = {}
 
 ## 沒有 idle 動畫時，走路動畫要停在哪一秒。
 var _idle_hold := 0.0
+
+## 站姿是否已經擺好。
+##
+## 不能用 current_animation 判斷：Godot 的 pause() 會把 current_animation 清成
+## 空字串（但 current_animation_position 保留），所以「current != walk」永遠成立，
+## _stand() 會每一幀重新 play + seek + pause，混合也跟著每幀重啟。
+var _holding := false
 
 
 ## 回傳是否成功載入模型。失敗時呼叫端應該保留膠囊當備援。
@@ -107,6 +115,11 @@ func load_character(id: StringName) -> bool:
 	_fix_cull_bounds(float(entry.get("height", 1.8)))
 	# 布娃娃排在程序化姿態之後：模擬開著的時候要由它說了算（TD-06）。
 	_ragdoll = Ragdoll.build(_skeleton)
+	if _ragdoll != null:
+		# 回復層排在最後，讀到的「動畫姿勢」才含 ProceduralPose 疊的東西。
+		_recovery = RagdollRecovery.new()
+		_recovery.name = "RagdollRecovery"
+		_skeleton.add_child(_recovery)
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -401,6 +414,8 @@ func start_ragdoll(impulse: Vector3) -> bool:
 		_player.stop()  # 動畫還在寫骨骼的話會跟模擬打架
 	_ragdoll.active = true
 	_ragdoll.physical_bones_start_simulation()
+	if _recovery != null:
+		_recovery.start_record()
 	# 衝量給每一根骨頭，而且乘上各自的質量——這樣每根拿到的速度變化都等於
 	# impulse，整具身體一起飛出去。只推髖部的話其餘部位會把它拖住，
 	# 實測 (4, 3, 1.5) 的擊退只移動了 6 公分，完全不好笑。
@@ -412,15 +427,18 @@ func start_ragdoll(impulse: Vector3) -> bool:
 
 ## 離開布娃娃。
 ##
-## 尚未實作 TD-06 說的「擷取當下姿勢，在 0.2–0.3 秒內混合到起身動畫首幀」——
-## 現在是直接切回動畫，會「啪」地彈一下。要做那個混合得先能看到畫面才調得動。
+## 姿勢不是在這裡拍的——這裡讀到的是引擎還原後的動畫姿勢，不是布娃娃的姿勢。
+## 側錄由 RagdollRecovery 在 modifier 堆疊裡面每幀做（見那個檔案的說明）。
 func stop_ragdoll() -> void:
 	if _ragdoll == null:
 		return
 	_ragdoll.physical_bones_stop_simulation()
 	_ragdoll.active = false
+	if _recovery != null:
+		_recovery.begin_recovery()
 	if _pose != null:
 		_pose.active = true
+	_holding = false
 
 
 func ragdoll_root() -> Vector3:
@@ -465,6 +483,7 @@ func drive(speed: float) -> void:
 		wanted = _clip(&"walk")
 	if wanted == &"":
 		return
+	_holding = false
 	if _player.current_animation != String(wanted):
 		_player.play(wanted, BLEND_TIME)
 	elif not _player.is_playing():
@@ -484,7 +503,11 @@ func _stand() -> void:
 		if _player.current_animation != String(idle):
 			_player.play(idle, BLEND_TIME)
 		_player.speed_scale = 1.0
+		_holding = false
 		return
+
+	if _holding and not _player.is_playing():
+		return  # 已經停在該停的那一幀，不要每幀重來
 
 	var walk := _clip(&"walk")
 	if walk == &"":
@@ -495,6 +518,7 @@ func _stand() -> void:
 		_player.speed_scale = 1.0
 		_player.seek(_idle_hold, true)
 		_player.pause()
+		_holding = true
 
 
 ## 播一次就回到移動狀態的動作（攻擊、受擊等）。
@@ -503,6 +527,7 @@ func play_action(logical: StringName) -> bool:
 	if _player == null or clip == &"":
 		return false
 	_action = clip
+	_holding = false
 	_player.speed_scale = 1.0
 	_player.play(clip, ACTION_BLEND_TIME)
 	if _pose != null:

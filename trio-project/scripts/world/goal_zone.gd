@@ -89,6 +89,7 @@ func _apply_occupancy(count: int, now_cleared: bool) -> void:
 	if now_cleared and not is_cleared:
 		is_cleared = true
 		cleared.emit()
+		Sfx.play(&"goal", global_position)
 		print("[Goal] 通關——有人站上高台了")
 
 

@@ -51,6 +51,9 @@ const ATTACK_MOVE_PENALTY := 0.35
 
 ## 落地速度低於這個值不受傷；超出的部分每 1 m/s 換算成多少傷害。
 ## 這是 M0 唯一的傷害來源——沒有它就驗不了倒地與救援。
+## 落地聲的速度門檻。比 SAFE_FALL_SPEED 低很多——有聲音跟有傷害是兩回事。
+const LAND_SOUND_SPEED := 3.0
+
 const SAFE_FALL_SPEED := 11.0
 const FALL_DAMAGE_PER_SPEED := 9.0
 
@@ -512,12 +515,15 @@ func _attack_context() -> StringName:
 func on_attack_started(spec: Dictionary) -> void:
 	var step: StringName = StringName(str(spec.get("name", "light_1")))
 	_character.play_action(ATTACK_CLIPS.get(step, &"attack1"))
+	# 第三段是重擊，音調壓低一點，聽得出來跟前兩段不同。
+	Sfx.play(&"whoosh", global_position, 0.85 if step == &"heavy_3" else 1.0)
 
 
 ## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。
 func on_hit_landed(spec: Dictionary) -> void:
 	_camera_shake = maxf(_camera_shake, float(spec.get("shake", 0.0)))
 	_character.freeze(float(spec.get("hitstop", 0.0)))
+	Sfx.play(&"hit", global_position)
 
 
 func combat_kind() -> StringName:
@@ -554,6 +560,9 @@ func _update_label() -> void:
 ## velocity.y 歸零，當幀讀到的永遠是 0。
 func _process_fall_damage() -> void:
 	var falling := -minf(velocity.y, 0.0)
+	# 落地聲的門檻比傷害低得多——輕輕跳一下也該有聲音，那是「我碰到地了」的回饋。
+	if is_on_floor() and _previous_fall_speed > LAND_SOUND_SPEED:
+		Sfx.play(&"land", global_position, 1.0 - minf(_previous_fall_speed / 30.0, 0.3))
 	if is_on_floor() and _previous_fall_speed > SAFE_FALL_SPEED:
 		DownSystem.request_fall_damage.rpc_id(1, slot_id, _previous_fall_speed)
 	_previous_fall_speed = falling
@@ -653,6 +662,7 @@ func on_downed(impulse: Vector3) -> void:
 	_throw_charge = 0.0
 	# 真布娃娃優先；建不出來（模型沒有人形骨架）才退回把整個 Visual 壓下去。
 	# 衝量由 DownSystem 廣播，三台機器的起始條件一致（TD-06）。
+	Sfx.play(&"down", global_position)
 	if not _character.start_ragdoll(impulse):
 		_visual.rotation.x = deg_to_rad(DOWNED_PITCH)
 		_character.play_action(&"death")
@@ -680,6 +690,7 @@ func on_revived() -> void:
 	_revive_progress = 0.0
 	_visual.rotation.x = 0.0
 	_character.stop_ragdoll()
+	Sfx.play(&"revive", global_position)
 
 
 ## 倒地時仍受重力與碰撞影響——被丟出去的人要能滾下斜坡，
@@ -718,6 +729,7 @@ func _process_downed(delta: float) -> void:
 func on_stacked(base_slot: int) -> void:
 	stacked_on = base_slot
 	velocity = Vector3.ZERO
+	Sfx.play(&"stack", global_position)
 
 
 func on_unstacked(push: Vector3) -> void:

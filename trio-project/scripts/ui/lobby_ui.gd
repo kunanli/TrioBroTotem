@@ -172,7 +172,12 @@ func _refresh_objective() -> void:
 		var zone: GoalZone = node
 		cleared = cleared or zone.is_cleared
 	if cleared:
-		lines.append("★ 已通關——有人站上高台了")
+		# 通關之後給第二個目標，否則星星亮了就沒事做了。
+		# 這一項才是 M0 真正的驗收標準（TD-10）。
+		if _stack_best >= STACK_TARGET:
+			lines.append("★★ 全部達成——通關 ＋ 三層疊高撐過 %.0f 秒" % STACK_TARGET)
+		else:
+			lines.append("★ 已通關。下一個目標：三層疊高走動 %.0f 秒" % STACK_TARGET)
 	else:
 		lines.append("目標：想辦法站上北邊的高台（3.6 公尺，跳不上去）")
 	lines.append(

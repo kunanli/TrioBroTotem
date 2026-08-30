@@ -175,6 +175,8 @@ func _apply_grab(slot_id: int, path: String) -> void:
 @rpc("authority", "call_local", "reliable")
 func _apply_release(slot_id: int, path: String, release_velocity: Vector3) -> void:
 	var carryable := get_node_or_null(NodePath(path)) as Carryable
+	if carryable != null and release_velocity.length() > 0.5:
+		Sfx.play(&"throw", carryable.global_position)
 	if carryable == null:
 		return
 	carryable.end_carry(release_velocity)
