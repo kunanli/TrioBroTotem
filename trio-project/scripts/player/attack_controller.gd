@@ -56,7 +56,7 @@ func _begin(context: StringName, index: int) -> void:
 		_spec = CombatSpec.step(index)
 		combo_index = index
 	phase = Phase.WINDUP
-	_timer = _spec["windup"]
+	_timer = float(_spec["windup"])
 	_already_hit.clear()
 	if _owner != null:
 		_owner.on_attack_started(_spec)
@@ -81,10 +81,10 @@ func _physics_process(delta: float) -> void:
 
 	if phase == Phase.WINDUP:
 		phase = Phase.ACTIVE
-		_timer = _spec["active"]
+		_timer = float(_spec["active"])
 	elif phase == Phase.ACTIVE:
 		phase = Phase.RECOVERY
-		_timer = _spec["recovery"]
+		_timer = float(_spec["recovery"])
 	else:
 		_finish()
 
@@ -108,8 +108,9 @@ func _scan_hits() -> void:
 			continue
 		_already_hit.append(body)
 		CombatSystem.report_hit.rpc_id(
-			1, _owner.slot_id, str(body.get_path()), _spec["damage"], _spec["knockback"]
+			1, _owner.slot_id, str(body.get_path()),
+			float(_spec["damage"]), float(_spec["knockback"])
 		)
 		# 命中的頓幀與鏡頭震在本機立刻生效，不等 host——回饋速度優先（docs/05）。
-		_hitstop = _spec["hitstop"]
+		_hitstop = float(_spec["hitstop"])
 		_owner.on_hit_landed(_spec)

@@ -50,13 +50,13 @@ func load_character(id: StringName) -> bool:
 		push_warning("[Visual] 名冊裡沒有 %s" % id)
 		return false
 
-	var scene: PackedScene = load(entry["model"])
+	var scene: PackedScene = load(String(entry["model"]))
 	if scene == null:
 		push_warning("[Visual] 載入失敗：%s" % entry["model"])
 		return false
 
 	_model = scene.instantiate()
-	_model.rotation.y = deg_to_rad(entry.get("yaw_offset", 0.0))
+	_model.rotation.y = deg_to_rad(float(entry.get("yaw_offset", 0.0)))
 	add_child(_model)
 
 	_cache_materials()

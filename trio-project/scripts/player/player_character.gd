@@ -230,8 +230,8 @@ func reassign(peer_id: int, ai: bool, label: String) -> void:
 func _setup_character() -> void:
 	character_id = CharacterRoster.id_for_slot(slot_id)
 	var entry := CharacterRoster.entry(character_id)
-	weight = entry.get("weight", WeightLadder.for_slot(slot_id))
-	character_height = entry.get("height", 1.8)
+	weight = float(entry.get("weight", WeightLadder.for_slot(slot_id)))
+	character_height = float(entry.get("height", 1.8))
 
 	var capsule := _collision.shape.duplicate() as CapsuleShape3D
 	if capsule != null:
@@ -456,8 +456,8 @@ func on_attack_started(_spec: Dictionary) -> void:
 
 ## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。
 func on_hit_landed(spec: Dictionary) -> void:
-	_camera_shake = maxf(_camera_shake, spec.get("shake", 0.0))
-	_character.freeze(spec.get("hitstop", 0.0))
+	_camera_shake = maxf(_camera_shake, float(spec.get("shake", 0.0)))
+	_character.freeze(float(spec.get("hitstop", 0.0)))
 
 
 func combat_kind() -> StringName:
@@ -548,7 +548,9 @@ func _process_stack_probe() -> void:
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		return
-	var other := hit.get("collider")
+	# Dictionary 取值回傳 Variant，:= 會推導成 Variant——Godot 4.7 把這個
+	# 警告當成錯誤，整支腳本會 parse error。一律標明型別。
+	var other: Node = hit.get("collider")
 	if other == null or not (other is PlayerCharacter):
 		return
 	StackSystem.request_stack.rpc_id(1, slot_id, other.slot_id)

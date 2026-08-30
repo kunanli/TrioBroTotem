@@ -209,6 +209,24 @@ def run(root):
             problems.append(f"{script.relative_to(root)}: 用到未宣告的常數 {name}")
     notes.append(f"常數：{undeclared} 個用到但沒宣告")
 
+    # --- 4c. 從 Variant 推導型別 ---
+    #
+    # Godot 4.7 把 inference_on_variant 這個警告當成錯誤，整支腳本會
+    # parse error。Dictionary 的取值一律回傳 Variant，所以
+    # `var x := d.get("k")` 與 `var x := d["k"]` 都會炸。
+    # 這一類 gdparse 看不出來，實際踩過一次。
+    variant_inference = 0
+    for script, text in script_text.items():
+        for number, line in enumerate(text.split("\n"), 1):
+            stripped = re.sub(r"#.*$", "", line)
+            if re.search(r":=\s*[\w\]\)]+\.get\(", stripped):
+                variant_inference += 1
+                problems.append(
+                    f"{script.relative_to(root)}:{number} "
+                    "`:=` 從 .get() 推導型別，那是 Variant——請改成明確標型別"
+                )
+    notes.append(f"型別推導：{variant_inference} 處從 Variant 推導")
+
     # --- 5. 角色身高：管線設定檔與遊戲名冊必須一致 ---
     heights_file = root / "assets" / "source" / "characters.json"
     roster_file = project / "scripts" / "core" / "character_roster.gd"

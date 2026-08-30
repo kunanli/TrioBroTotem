@@ -35,7 +35,9 @@ func report_hit(attacker_slot: int, victim_path: String, damage: float, knockbac
 		return
 
 	var attacker := CarrySystem.find_player(attacker_slot)
-	var victim := get_node_or_null(NodePath(victim_path))
+	# 標成 Node3D，否則 victim.global_position 會是 Variant，
+	# 下面的 direction 就推導不出型別。
+	var victim := get_node_or_null(NodePath(victim_path)) as Node3D
 	if attacker == null or victim == null or victim == attacker:
 		return
 	if not victim.has_method("take_hit"):
@@ -62,7 +64,7 @@ func report_hit(attacker_slot: int, victim_path: String, damage: float, knockbac
 
 @rpc("authority", "call_local", "reliable")
 func _apply_hit(victim_path: String, damage: float, impulse: Vector3) -> void:
-	var victim := get_node_or_null(NodePath(victim_path))
+	var victim := get_node_or_null(NodePath(victim_path)) as Node3D
 	if victim != null and victim.has_method("take_hit"):
 		victim.take_hit(damage, impulse)
 
