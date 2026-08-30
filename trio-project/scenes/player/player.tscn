@@ -1,8 +1,9 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player_character.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/core/carryable.gd" id="2_carryable"]
 [ext_resource type="Script" path="res://scripts/player/character_visual.gd" id="3_visual"]
+[ext_resource type="Script" path="res://scripts/player/attack_controller.gd" id="4_attack"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -17,6 +18,9 @@ size = Vector3(0.18, 0.18, 0.3)
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_grab"]
 radius = 0.9
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_hit"]
+radius = 1.1
 
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
@@ -40,6 +44,18 @@ mesh = SubResource("BoxMesh_nose")
 
 [node name="Character" type="Node3D" parent="Visual"]
 script = ExtResource("3_visual")
+
+[node name="AttackController" type="Node3D" parent="Visual"]
+script = ExtResource("4_attack")
+
+[node name="HitBox" type="Area3D" parent="Visual/AttackController"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1)
+collision_layer = 0
+collision_mask = 10
+monitoring = false
+
+[node name="Shape" type="CollisionShape3D" parent="Visual/AttackController/HitBox"]
+shape = SubResource("SphereShape3D_hit")
 
 [node name="CarryAnchor" type="Node3D" parent="Visual"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -0.5)

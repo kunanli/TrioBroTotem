@@ -23,6 +23,7 @@ GameInput="*res://scripts/autoload/game_input.gd"
 CarrySystem="*res://scripts/autoload/carry_system.gd"
 StackSystem="*res://scripts/autoload/stack_system.gd"
 DownSystem="*res://scripts/autoload/down_system.gd"
+CombatSystem="*res://scripts/autoload/combat_system.gd"
 
 [display]
 
@@ -36,6 +37,7 @@ window/stretch/aspect="expand"
 3d_physics/layer_1="World"
 3d_physics/layer_2="Player"
 3d_physics/layer_3="Prop"
+3d_physics/layer_4="Enemy"
 
 [physics]
 

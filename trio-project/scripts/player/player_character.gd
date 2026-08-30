@@ -46,6 +46,9 @@ const STRUGGLE_TO_BREAK := 2.4
 ## 扛著東西時的移動懲罰。扛人比扛箱子更明顯——這是喜劇來源，不是平衡數值。
 const CARRY_SPEED_PENALTY := 0.7
 
+## 攻擊中的移動懲罰。不完全鎖住，因為 Overcooked 基準要的是能一直動。
+const ATTACK_MOVE_PENALTY := 0.35
+
 ## 落地速度低於這個值不受傷；超出的部分每 1 m/s 換算成多少傷害。
 ## 這是 M0 唯一的傷害來源——沒有它就驗不了倒地與救援。
 const SAFE_FALL_SPEED := 11.0
@@ -134,11 +137,13 @@ var _base_label: String = ""
 var _camera_yaw: float = 0.0
 var _camera_pitch: float = CAMERA_PITCH_DEFAULT
 var _camera_anchor: Vector3 = Vector3.ZERO
+var _camera_shake: float = 0.0
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
 @onready var stack_anchor: Node3D = $StackAnchor
 
+@onready var _attack: AttackController = $Visual/AttackController
 @onready var _character: CharacterVisual = $Visual/Character
 @onready var _collision: CollisionShape3D = $Collision
 @onready var _visual: Node3D = $Visual
@@ -150,6 +155,7 @@ var _camera_anchor: Vector3 = Vector3.ZERO
 func _ready() -> void:
 	add_to_group("player_characters")
 	_setup_character()
+	_attack.setup(self)
 	_carryable.weight = weight
 
 	_setup_synchronizer()
@@ -250,7 +256,11 @@ func _orbit_offset() -> Vector3:
 ## 落後的鏡頭為了盯住角色會額外轉一個角度，整個畫面跟著晃。
 ## 改成只有注視點在平滑，鏡頭就只有位移延遲，沒有轉動晃動。
 func _place_camera() -> void:
-	_camera.global_position = _camera_anchor + _orbit_offset()
+	var jitter := Vector3.ZERO
+	if _camera_shake > 0.0:
+		# 快速衰減。慢衰減會拖節奏，與 Overcooked 基準打架（docs/05）。
+		jitter = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * _camera_shake
+	_camera.global_position = _camera_anchor + _orbit_offset() + jitter
 	_camera.look_at(_camera_anchor, Vector3.UP)
 
 
@@ -304,6 +314,7 @@ func _process(delta: float) -> void:
 	_camera_anchor.x = lerpf(_camera_anchor.x, target.x, horizontal)
 	_camera_anchor.z = lerpf(_camera_anchor.z, target.z, horizontal)
 	_camera_anchor.y = lerpf(_camera_anchor.y, target.y, vertical)
+	_camera_shake = move_toward(_camera_shake, 0.0, delta / CombatSpec.SHAKE_DECAY)
 	_place_camera()
 
 
@@ -371,6 +382,8 @@ func _process_authority(delta: float) -> void:
 		wish = wish.normalized()
 
 	var speed := SPEED * (CARRY_SPEED_PENALTY if is_carrying() else 1.0)
+	if _attack.busy():
+		speed *= ATTACK_MOVE_PENALTY  # 出手時腳步收住，攻擊才有重量
 	var moving := wish.length_squared() > 0.01
 	# 水平速度整個向量一起算，不要拆成 x 與 z 各自 move_toward——
 	# 分軸處理會讓斜向的加速度比正向快 √2 倍，轉向時也會有稜有角。
@@ -398,6 +411,38 @@ func _process_authority(delta: float) -> void:
 	net_position = global_position
 	net_velocity = velocity
 	net_yaw = _yaw
+
+
+## 情境攻擊（docs/06）：不佔按鍵，變化來自「你正在做什麼」。
+func _attack_context() -> StringName:
+	if not is_on_floor():
+		return &"air"
+	if Vector3(velocity.x, 0.0, velocity.z).length() > CombatSpec.DASH_SPEED_THRESHOLD:
+		return &"dash"
+	return &"stand"
+
+
+func on_attack_started(_spec: Dictionary) -> void:
+	_character.play_action(&"attack")
+
+
+## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。
+func on_hit_landed(spec: Dictionary) -> void:
+	_camera_shake = maxf(_camera_shake, spec.get("shake", 0.0))
+	_character.freeze(spec.get("hitstop", 0.0))
+
+
+func combat_kind() -> StringName:
+	return &"player"
+
+
+## 被打到。擊退永遠生效，扣血由 host 依誤傷開關決定（docs/04）。
+func take_hit(damage: float, impulse: Vector3) -> void:
+	_character.flash()
+	if is_multiplayer_authority():
+		velocity = impulse
+	if NetworkService.is_host() and damage > 0.0:
+		DownSystem.apply_damage(slot_id, damage, impulse)
 
 
 ## 名牌兼狀態顯示。M0 還沒有 HUD（docs/06 那一套要等 M1），
@@ -481,9 +526,9 @@ func _process_stack_probe() -> void:
 
 ## 只送請求，不自己決定結果。目標查詢與重量驗證都在 host（TD-02）。
 func _process_carry_input(delta: float) -> void:
-	# 攻擊：手上沒東西時是攻擊動作，抓著東西時攻擊鍵是投擲（docs/06）。
+	# 攻擊：手上沒東西時才是攻擊，抓著東西時攻擊鍵是投擲（docs/06）。
 	if not is_carrying() and GameInput.is_attack_pressed(device_id):
-		_character.play_action(&"attack")
+		_attack.press(_attack_context())
 
 	if GameInput.is_grab_pressed(device_id):
 		if is_carrying():
