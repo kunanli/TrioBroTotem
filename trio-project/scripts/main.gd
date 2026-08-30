@@ -43,9 +43,18 @@ func _apply_cmdline() -> void:
 
 
 func _on_slots_changed() -> void:
-	# 名冊在每台機器上都會變，但只有 host 動生成。
+	# 接手／交還 AI 只是換欄位，每一端都要照做，這樣三邊算出來的
+	# 權威歸屬才一致。生成與回收仍然只有 host 動。
+	_sync_existing()
 	if NetworkService.is_host():
 		_reconcile_players()
+
+
+func _sync_existing() -> void:
+	for slot in PlayerRegistry.slots:
+		var player := _find_player(slot.slot_id)
+		if player != null:
+			player.reassign(slot.peer_id, slot.is_ai, slot.display_name)
 
 
 func _reconcile_players() -> void:

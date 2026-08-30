@@ -55,6 +55,25 @@ func free_slot_id() -> int:
 func _on_hosted() -> void:
 	slots.clear()
 	_host_claim_slot(NetworkService.local_peer_id(), local_display_name, local_device_id)
+	_fill_with_ai()
+
+
+## 空位一律由 AI 補上（docs/11 Must：沒有它，湊不到三人的玩家無法遊玩）。
+## 隊伍永遠是三個人，真人加入時是「接手」某個 AI，不是新增一個位置。
+func _fill_with_ai() -> void:
+	var host := NetworkService.local_peer_id()
+	var added := false
+	for candidate in PlayerSlot.MAX_SLOTS:
+		if get_slot(candidate) != null:
+			continue
+		var slot := PlayerSlot.new(candidate, host, -1)
+		slot.is_ai = true
+		slot.display_name = "AI-%d" % candidate
+		slots.append(slot)
+		added = true
+	if added:
+		slots.sort_custom(_by_slot_id)
+		_broadcast()
 
 
 func _on_joined() -> void:
@@ -63,17 +82,22 @@ func _on_joined() -> void:
 	_request_register.rpc_id(1, local_display_name, local_device_id)
 
 
+## 有人離線時把位置交還給 AI，而不是把角色收掉。
+## 隊伍維持三個人，剩下的玩家不會突然少一個隊友（docs/11 AI 補位）。
 func _on_peer_left(peer_id: int) -> void:
 	if not NetworkService.is_host():
 		return
-	var kept: Array[PlayerSlot] = []
+	var changed := false
 	for slot in slots:
 		if slot.peer_id != peer_id:
-			kept.append(slot)
-	if kept.size() == slots.size():
-		return
-	slots = kept
-	_broadcast()
+			continue
+		slot.peer_id = NetworkService.local_peer_id()
+		slot.device_id = -1
+		slot.is_ai = true
+		slot.display_name = "AI-%d" % slot.slot_id
+		changed = true
+	if changed:
+		_broadcast()
 
 
 func _on_disconnected() -> void:
@@ -81,7 +105,25 @@ func _on_disconnected() -> void:
 	slots_changed.emit()
 
 
+## 真人加入時優先接手 AI 的位置——只換 peer_id 與 is_ai 兩個欄位，
+## 角色的位置、血量、手上拿的東西全部原封不動（TD-04）。
+func _first_ai_slot() -> PlayerSlot:
+	for slot in slots:
+		if slot.is_ai:
+			return slot
+	return null
+
+
 func _host_claim_slot(peer_id: int, display_name: String, device_id: int) -> bool:
+	var taken := _first_ai_slot()
+	if taken != null:
+		taken.peer_id = peer_id
+		taken.device_id = device_id
+		taken.is_ai = false
+		taken.display_name = display_name
+		_broadcast()
+		return true
+
 	var slot_id := free_slot_id()
 	if slot_id < 0:
 		push_warning("[Registry] 隊伍已滿，拒絕 peer %d" % peer_id)

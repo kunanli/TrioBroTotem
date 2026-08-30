@@ -1,9 +1,10 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player_character.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/core/carryable.gd" id="2_carryable"]
 [ext_resource type="Script" path="res://scripts/player/character_visual.gd" id="3_visual"]
 [ext_resource type="Script" path="res://scripts/player/attack_controller.gd" id="4_attack"]
+[ext_resource type="Script" path="res://scripts/player/ai_brain.gd" id="5_brain"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -67,6 +68,9 @@ collision_mask = 6
 
 [node name="Shape" type="CollisionShape3D" parent="Visual/GrabProbe"]
 shape = SubResource("SphereShape3D_grab")
+
+[node name="AiBrain" type="Node" parent="."]
+script = ExtResource("5_brain")
 
 [node name="StackAnchor" type="Node3D" parent="."]
 

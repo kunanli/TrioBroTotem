@@ -132,6 +132,7 @@ var _next_stack_request: float = 0.0
 var _revive_progress: float = 0.0
 var _previous_fall_speed: float = 0.0
 var _base_label: String = ""
+var _intent := PlayerIntent.new()
 
 ## 鏡頭角度與追隨中的注視點。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
 var _camera_yaw: float = 0.0
@@ -143,6 +144,7 @@ var _camera_shake: float = 0.0
 @onready var grab_probe: Area3D = $Visual/GrabProbe
 @onready var stack_anchor: Node3D = $StackAnchor
 
+@onready var _brain: AiBrain = $AiBrain
 @onready var _attack: AttackController = $Visual/AttackController
 @onready var _character: CharacterVisual = $Visual/Character
 @onready var _collision: CollisionShape3D = $Collision
@@ -204,6 +206,20 @@ func _setup_synchronizer() -> void:
 	sync.replication_config = config
 	sync.replication_interval = 1.0 / SYNC_HZ
 	add_child(sync)
+
+
+## 由 Main 在名冊變動時呼叫。真人中途接手 AI 時只換這兩個欄位，
+## 角色的位置、血量、手上拿的東西全部原封不動（TD-04）。
+func reassign(peer_id: int, ai: bool, label: String) -> void:
+	if owner_peer_id == peer_id and is_ai == ai and display_name == label:
+		return
+	owner_peer_id = peer_id
+	is_ai = ai
+	display_name = label
+	_base_label = label
+	set_multiplayer_authority(peer_id)
+	_camera.current = is_multiplayer_authority() and not is_ai
+	_intent.clear()
 
 
 ## 依角色身高調整碰撞體、鏡頭與攜帶錨點，再載入模型。
@@ -345,6 +361,16 @@ func is_carrying() -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	# 意圖每幀只收集一次。手把的 just_pressed 是自己做的邊緣偵測，
+	# 在不同分支各問一次會把狀態吃掉，按鍵就會時靈時不靈。
+	if is_multiplayer_authority():
+		if is_ai:
+			_brain.think(self, _intent)
+		else:
+			_intent.fill_from_input(device_id)
+	else:
+		_intent.clear()
+
 	if is_downed and carried_by_slot < 0:
 		_process_downed(delta)
 	elif carried_by_slot >= 0:
@@ -363,7 +389,7 @@ func _physics_process(delta: float) -> void:
 func _process_authority(delta: float) -> void:
 	# 每一幀都問，不能只在著地時問——手把的 just_pressed 是自己做的邊緣偵測，
 	# 漏問幾幀狀態就會過期，導致「握著跳鍵落地後跳不起來」。
-	var jump_pressed := GameInput.is_jump_pressed(device_id)
+	var jump_pressed := _intent.jump
 	if jump_pressed and is_on_floor() and StackSystem.rider_of(slot_id) >= 0:
 		# 底層跳躍 → 整柱潰散（docs/04）。要在跳之前送，
 		# 否則上層會先跟著飛起來再被拆，看起來像 bug。
@@ -376,8 +402,10 @@ func _process_authority(delta: float) -> void:
 	else:
 		velocity.y -= _gravity * (FALL_MULTIPLIER if velocity.y < 0.0 else 1.0) * delta
 
-	var input := GameInput.get_move_vector(device_id)
-	var wish := _camera_basis() * Vector3(input.x, 0.0, input.y)
+	# AI 沒有鏡頭，直接給世界方向；真人的輸入相對鏡頭。
+	var wish := Vector3(_intent.move.x, 0.0, _intent.move.y)
+	if not _intent.world_move:
+		wish = _camera_basis() * wish
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 
@@ -472,7 +500,7 @@ func _process_fall_damage() -> void:
 ## 扶起隊友：按住互動鍵靠近倒地的人。累積在自己這端算，
 ## 滿了才送一次請求——每幀送在 120 Hz 下會是 120 packets/s。
 func _process_revive_input(delta: float) -> void:
-	if not GameInput.is_pressed(device_id, &"interact"):
+	if not _intent.interact:
 		_revive_progress = 0.0
 		return
 	var target := _nearest_downed()
@@ -503,7 +531,9 @@ func _nearest_downed() -> int:
 ## 只在下墜時偵測。站著往旁邊走過去也會探到人，那時吸附會很突兀——
 ## 要有「跳上去」這個動作，疊高才像是玩家做的事而不是走路的副作用。
 func _process_stack_probe() -> void:
-	if stacked_on >= 0 or velocity.y > 0.0 or is_on_floor():
+	# AI 不主動疊高（docs/08 明列為「不需要會」）。它要能被踩，
+	# 但不該自己跳到隊友頭上——那會變成玩家得先把 AI 趕下來。
+	if is_ai or stacked_on >= 0 or velocity.y > 0.0 or is_on_floor():
 		return
 	# 節流。物理跑 120 Hz，落在隊友頭上的那段時間會送出幾十個一模一樣的
 	# 請求——host 只會接受第一個，其餘全是白花的頻寬。
@@ -527,10 +557,10 @@ func _process_stack_probe() -> void:
 ## 只送請求，不自己決定結果。目標查詢與重量驗證都在 host（TD-02）。
 func _process_carry_input(delta: float) -> void:
 	# 攻擊：手上沒東西時才是攻擊，抓著東西時攻擊鍵是投擲（docs/06）。
-	if not is_carrying() and GameInput.is_attack_pressed(device_id):
+	if not is_carrying() and _intent.attack:
 		_attack.press(_attack_context())
 
-	if GameInput.is_grab_pressed(device_id):
+	if _intent.grab:
 		if is_carrying():
 			CarrySystem.request_drop.rpc_id(1, slot_id)
 		else:
@@ -540,7 +570,7 @@ func _process_carry_input(delta: float) -> void:
 		_throw_charge = 0.0
 		return
 
-	if GameInput.is_throw_held(device_id):
+	if _intent.throw_held:
 		_throw_charge = minf(_throw_charge + delta / THROW_CHARGE_TIME, 1.0)
 	elif _throw_charge > 0.0:
 		CarrySystem.request_throw.rpc_id(1, slot_id, _throw_charge)
@@ -614,7 +644,7 @@ func _process_stacked() -> void:
 		return
 	# 上層仍保有鏡頭自由（docs/04 被抓者仍保有鏡頭旋轉，疊高同理），
 	# 但移動輸入不推動角色——上層是乘客，不是共同施力者。
-	if GameInput.is_jump_pressed(device_id):
+	if _intent.jump:
 		StackSystem.request_dismount.rpc_id(1, slot_id)
 
 
@@ -631,7 +661,7 @@ func _process_carried(delta: float) -> void:
 		return
 	# 掙扎在被抓者自己這端累積，滿了才送一次請求——
 	# 每幀送搖桿量會是 60 packets/s，一個人被抓就吃掉整條頻寬。
-	var struggle_input := GameInput.get_move_vector(device_id).length()
+	var struggle_input := _intent.move.length()
 	_struggle += struggle_input * delta
 	if _struggle >= STRUGGLE_TO_BREAK:
 		_struggle = 0.0
