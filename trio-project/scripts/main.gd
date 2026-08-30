@@ -26,11 +26,18 @@ func _ready() -> void:
 	_apply_cmdline()
 
 
-## 讓「開三個實例」不用每次都手動點按鈕：
+## 讓多開不用每次都手動點按鈕：
 ##   godot --path . -- --host
 ##   godot --path . -- --join=127.0.0.1
+##
+## 兩份參數清單都掃：user_args 只有 `--` 之後的東西，但編輯器的
+## 「Customize Run Instances」把 Launch Arguments 直接接在命令列上，
+## 不一定會加那個分隔符——只認一種的話，在編輯器裡設了參數卻沒反應，
+## 而且不會有任何錯誤訊息。
 func _apply_cmdline() -> void:
-	for arg in OS.get_cmdline_user_args():
+	var args := OS.get_cmdline_user_args()
+	args.append_array(OS.get_cmdline_args())
+	for arg in args:
 		if arg == "--host":
 			NetworkService.host_game()
 			return
