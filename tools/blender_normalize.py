@@ -428,6 +428,48 @@ def scale_rig(armature, meshes, factor):
                 point.handle_right.y *= factor
 
 
+def strip_object_transform_curves(armature):
+    """刪掉動作裡「物件層級」的 TRS 曲線，只留骨骼曲線。
+
+    Blender 的 glTF 匯入器會把 Armature 節點自己的 TRS 也做成動畫曲線，和骨骼
+    曲線放在同一個 action 裡。那些曲線鎖著匯入時的 scale 0.01——你把
+    armature.scale 設成 1，下一次 depsgraph 評估動畫時又被打回 0.01，
+    而 glTF 匯出器讀的 matrix_world 正是評估後的結果。
+
+    症狀是匯出檔帶著 0.01 的根節點縮放、骨骼資料 100 倍。連鎖後果有三個：
+    匯出尺寸差 100 倍（export_verified 的修正迴圈就是在補這個）、Godot 的剖面盒
+    比幾何體小 100 倍（角色被剔除，畫面上看不到人）、布娃娃的剛體掛在 0.01
+    縮放底下導致模擬亂飄。
+
+    物件層級的位移本來也不該留（TD-08：移動是 CharacterBody3D 的事），
+    所以三軸一起刪，不只刪 scale。
+    """
+    targets = ("location", "rotation_euler", "rotation_quaternion", "scale")
+    removed = 0
+    for action in bpy.data.actions:
+        doomed = [c for c in iter_fcurves(action) if c.data_path in targets]
+        for curve in doomed:
+            _remove_fcurve(action, curve)
+            removed += 1
+    if removed:
+        print(f"刪掉 {removed} 條物件層級的 TRS 曲線（它們鎖著匯入時的 scale）")
+    return removed
+
+
+def _remove_fcurve(action, curve):
+    """4.4 之前掛在 action.fcurves，4.4+ 掛在 channelbag 上。"""
+    legacy = getattr(action, "fcurves", None)
+    if legacy is not None:
+        legacy.remove(curve)
+        return
+    for layer in getattr(action, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            for bag in getattr(strip, "channelbags", []):
+                if curve in list(bag.fcurves):
+                    bag.fcurves.remove(curve)
+                    return
+
+
 def flatten_object_scale(armature, meshes):
     """把物件層級的 scale 折進骨骼與網格資料，然後把物件 scale 歸一。
 
@@ -445,6 +487,16 @@ def flatten_object_scale(armature, meshes):
     if abs(factor - 1.0) > 1e-9:
         scale_rig(armature, meshes, factor)
         armature.scale = Vector((1.0, 1.0, 1.0))
+        # 改完 scale 一定要更新 depsgraph。物件的 .scale 是即時的，但
+        # .matrix_world 是快取——不更新的話它還是舊值，而 glTF 匯出器讀的正是
+        # matrix_world。實測：scale 與 delta_scale 都已經是 1，matrix_world 卻還是
+        # 0.01，於是匯出檔帶著 0.01 的根節點縮放、骨骼資料 100 倍。
+        #
+        # 這一個沒更新的矩陣造成了三件事：匯出尺寸差 100 倍（export_verified 的
+        # 修正迴圈就是在補這個）、Godot 的剖面盒比幾何體小 100 倍（角色被剔除看不見）、
+        # 以及布娃娃的剛體掛在 0.01 縮放底下導致模擬亂飄。
+        strip_object_transform_curves(armature)
+        bpy.context.view_layer.update()
         print(f"物件 scale {fmt(factor)} 已折進資料")
 
     for obj in meshes:

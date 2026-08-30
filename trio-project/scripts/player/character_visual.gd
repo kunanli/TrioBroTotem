@@ -70,6 +70,7 @@ var _player: AnimationPlayer = null
 var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
+var _ragdoll: PhysicalBoneSimulator3D = null
 var _action: StringName = &""
 
 ## 邏輯名稱 -> 模型裡真正的動畫名稱。
@@ -104,6 +105,8 @@ func load_character(id: StringName) -> bool:
 	_cache_materials(bool(entry.get("alpha", false)))
 	_attach_pose(entry)
 	_fix_cull_bounds(float(entry.get("height", 1.8)))
+	# 布娃娃排在程序化姿態之後：模擬開著的時候要由它說了算（TD-06）。
+	_ragdoll = Ragdoll.build(_skeleton)
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -236,6 +239,20 @@ func _fix_cull_bounds(target_height: float) -> void:
 		high = Vector3(maxf(high.x, point.x), maxf(high.y, point.y), maxf(high.z, point.z))
 	if not (high.y > low.y):
 		return
+
+	# 資產正常時網格外框本來就跟角色一樣大，不需要補救。
+	# 只有壞掉的匯出檔（頂點寫在 1/100 的尺度、用 100 倍的 inverse bind 補回來）
+	# 才會出現「剖面盒比幾何體小 100 倍」，那時角色會被剔除或被 LOD 畫成空的。
+	var mesh_height := 0.0
+	for node in _skeleton.find_children("*", "MeshInstance3D", true, false):
+		mesh_height = maxf(mesh_height, (node as MeshInstance3D).get_aabb().size.y)
+	if mesh_height > (high.y - low.y) * 0.5:
+		return
+	push_warning(
+		"[Visual] %s 的網格外框只有 %.4f，骨架卻有 %.4f——剖面盒對不上幾何體，"
+		% [character_id, mesh_height, high.y - low.y]
+		+ "已加保險。正解是重跑美術管線：python tools/run_blender.py normalize-all"
+	)
 	var centre := (low + high) * 0.5
 	var size := (high - low) * 1.6
 	size = Vector3(maxf(size.x, size.y * 0.8), size.y, maxf(size.z, size.y * 0.8))
@@ -371,6 +388,53 @@ func _process(delta: float) -> void:
 
 func available() -> PackedStringArray:
 	return _player.get_animation_list() if _player else PackedStringArray()
+
+
+## 進入布娃娃（TD-06）。impulse 是觸發當下的衝量，由 host 廣播下來，
+## 所以三台機器的起始條件一致；之後的骨骼模擬各機自算，姿勢略有差異無妨。
+func start_ragdoll(impulse: Vector3) -> bool:
+	if _ragdoll == null:
+		return false
+	if _pose != null:
+		_pose.active = false  # 呼吸與看向在倒地時沒有意義，也會跟物理搶
+	if _player != null:
+		_player.stop()  # 動畫還在寫骨骼的話會跟模擬打架
+	_ragdoll.active = true
+	_ragdoll.physical_bones_start_simulation()
+	# 衝量給每一根骨頭，而且乘上各自的質量——這樣每根拿到的速度變化都等於
+	# impulse，整具身體一起飛出去。只推髖部的話其餘部位會把它拖住，
+	# 實測 (4, 3, 1.5) 的擊退只移動了 6 公分，完全不好笑。
+	for child in _ragdoll.get_children():
+		var bone: PhysicalBone3D = child
+		bone.apply_central_impulse(impulse * bone.mass)
+	return true
+
+
+## 離開布娃娃。
+##
+## 尚未實作 TD-06 說的「擷取當下姿勢，在 0.2–0.3 秒內混合到起身動畫首幀」——
+## 現在是直接切回動畫，會「啪」地彈一下。要做那個混合得先能看到畫面才調得動。
+func stop_ragdoll() -> void:
+	if _ragdoll == null:
+		return
+	_ragdoll.physical_bones_stop_simulation()
+	_ragdoll.active = false
+	if _pose != null:
+		_pose.active = true
+
+
+func ragdoll_root() -> Vector3:
+	if _ragdoll == null:
+		return Vector3.ZERO
+	for child in _ragdoll.get_children():
+		var bone: PhysicalBone3D = child
+		if bone.name == "Hips":
+			return bone.global_position
+	return Vector3.ZERO
+
+
+func has_ragdoll() -> bool:
+	return _ragdoll != null
 
 
 ## 看向目標（世界座標）。純表演，不同步——三台機器的角色位置本來就一致，

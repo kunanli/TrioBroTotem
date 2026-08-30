@@ -643,27 +643,41 @@ func on_downed(impulse: Vector3) -> void:
 	velocity = impulse
 	_revive_progress = 0.0
 	_throw_charge = 0.0
-	_visual.rotation.x = deg_to_rad(DOWNED_PITCH)
-	_character.play_action(&"death")
+	# 真布娃娃優先；建不出來（模型沒有人形骨架）才退回把整個 Visual 壓下去。
+	# 衝量由 DownSystem 廣播，三台機器的起始條件一致（TD-06）。
+	if not _character.start_ragdoll(impulse):
+		_visual.rotation.x = deg_to_rad(DOWNED_PITCH)
+		_character.play_action(&"death")
 
 
 func on_revived() -> void:
 	is_downed = false
 	_revive_progress = 0.0
 	_visual.rotation.x = 0.0
+	_character.stop_ragdoll()
 
 
 ## 倒地時仍受重力與碰撞影響——被丟出去的人要能滾下斜坡，
 ## 那是「事故就是內容」的一部分。但沒有輸入，也不能自行復活（docs/04）。
 ##
-## 位置仍由自己這端算（TD-02），不是 TD-06 說的 host 權威根位置。
-## 現階段可以這樣，因為倒地還是 CharacterBody3D 在跑、而且扶起要按住
-## 2.5 秒，30 Hz 同步的落差不影響判定。等換成真正的 PhysicalBone3D
-## ragdoll 時要回頭改——那時骨骼各機自算，根位置就必須是 host 說了算。
+## 根位置由權威端算並同步（TD-06）。骨骼各機自算，姿勢不一樣無妨，
+## 但「你倒在哪」必須一致——那決定隊友扶不扶得到你。
+##
+## 有布娃娃時，本體的位置跟著布娃娃的髖部走：人被打飛出去滾了三公尺，
+## 扶起判定就該在三公尺外的那個位置，不是原地。
 func _process_downed(delta: float) -> void:
 	if not is_multiplayer_authority():
 		_process_remote(delta)
 		return
+	if _character.has_ragdoll():
+		var root := _character.ragdoll_root()
+		if root != Vector3.ZERO:
+			# 布娃娃的髖部大約在半身高，本體原點在膠囊中心，兩者對齊即可。
+			global_position = root
+			velocity = Vector3.ZERO
+			net_position = global_position
+			net_velocity = Vector3.ZERO
+			return
 	if not is_on_floor():
 		velocity.y -= _gravity * FALL_MULTIPLIER * delta
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
