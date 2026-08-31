@@ -1,0 +1,32 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/prop.gd" id="1_prop"]
+[ext_resource type="Script" path="res://scripts/core/carryable.gd" id="2_carryable"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/rock.tres" id="m_rock"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_rock"]
+radius = 0.5
+
+[sub_resource type="SphereMesh" id="SphereMesh_rock"]
+radius = 0.5
+height = 1.0
+radial_segments = 7
+rings = 4
+
+[node name="Rock" type="RigidBody3D"]
+collision_layer = 4
+collision_mask = 7
+mass = 16.0
+script = ExtResource("1_prop")
+carry_weight = 35.0
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_rock")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.0652, 0, -0.3461, 0, 0.96, 0, 0.3646, 0, 1.1222, 0, 0, 0)
+mesh = SubResource("SphereMesh_rock")
+material_override = ExtResource("m_rock")
+
+[node name="Carryable" type="Node3D" parent="."]
+script = ExtResource("2_carryable")

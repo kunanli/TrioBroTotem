@@ -1,6 +1,7 @@
 [gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/mud_puppet.gd" id="1_puppet"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/corrupt.tres" id="m_corrupt"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_puppet"]
 radius = 0.32
@@ -9,10 +10,6 @@ height = 1.0
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_puppet"]
 radius = 0.32
 height = 1.0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_puppet"]
-albedo_color = Color(0.35, 0.28, 0.22, 1)
-roughness = 0.9
 
 [node name="MudPuppet" type="CharacterBody3D"]
 collision_layer = 8
@@ -24,4 +21,4 @@ shape = SubResource("CapsuleShape3D_puppet")
 
 [node name="Mesh" type="MeshInstance3D" parent="."]
 mesh = SubResource("CapsuleMesh_puppet")
-material_override = SubResource("StandardMaterial3D_puppet")
+material_override = ExtResource("m_corrupt")

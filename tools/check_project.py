@@ -156,6 +156,19 @@ def run_optional(scripts):
     notes.append("godot-parser：場景全部解析成功")
 
 
+def check_materials():
+    """scenes/world/materials/*.tres 必須是 palette.gd 產生出來的。
+
+    兩份寫著同一組顏色遲早會有人只改一邊。跟 check_wiring 對
+    characters.json ↔ character_roster.gd 身高的做法一樣，這裡也用比對擋住。
+    """
+    import sync_materials
+
+    for line in sync_materials.run(check_only=True):
+        problems.append(line)
+    notes.append(f"共用材質：{len(sync_materials.WANTED)} 份與 palette.gd 一致")
+
+
 def find_godot():
     """找 Godot 執行檔。Godot 通常是一個獨立的 exe，很少在 PATH 上。"""
     import glob
@@ -289,6 +302,7 @@ def main():
     check_project_settings()
     check_scenes()
     run_optional(check_indentation())
+    check_materials()
     check_model_sizes()
     check_wiring()
     check_with_godot()

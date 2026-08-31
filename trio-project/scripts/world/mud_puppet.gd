@@ -38,6 +38,9 @@ var _hitstop := 0.0
 var _broken_seen := false
 var _flash := 0.0
 var _material: StandardMaterial3D = null
+var _base_emission_on := false
+var _base_emission := Color.BLACK
+var _base_emission_energy := 1.0
 
 @onready var _mesh: MeshInstance3D = $Mesh
 
@@ -53,6 +56,10 @@ func _ready() -> void:
 	# 敵人也要描邊：docs/09 要求「半畫面尺寸下仍須可辨識」，而混戰時最需要
 	# 一眼分辨的就是「哪個是敵人」。場景方塊沒有描邊，所以描了邊的就是會動的東西。
 	_material.next_pass = Outline.material()
+	# 記下常駐的發光，白閃結束時要還原成這個，不是還原成「關掉」。
+	_base_emission_on = _material.emission_enabled
+	_base_emission = _material.emission
+	_base_emission_energy = _material.emission_energy_multiplier
 	_mesh.material_override = _material
 	_setup_synchronizer()
 	set_multiplayer_authority(1)
@@ -100,11 +107,22 @@ func on_hit_predicted(direction: Vector3) -> void:
 	Vfx.burst(&"hit_spark", global_position + Vector3.UP * 0.4, direction)
 
 
+## 命中白閃。
+##
+## 存下再還原，**不要切 emission_enabled 這個 bool**——泥偶現在是常駐發紫光的
+## （腐化，docs/02），把 bool 關掉會在第一次被打之後永久熄滅，而且不會有任何
+## 錯誤訊息，只是那隻泥偶從此比別隻暗。
 func _flash_now() -> void:
 	_flash = CombatSpec.FLASH_TIME
 	_material.emission_enabled = true
 	_material.emission = Color.WHITE
 	_material.emission_energy_multiplier = 1.6
+
+
+func _flash_done() -> void:
+	_material.emission_enabled = _base_emission_on
+	_material.emission = _base_emission
+	_material.emission_energy_multiplier = _base_emission_energy
 
 
 ## 被打中的那一刻，每一端各自播。用「第一次看到 is_broken 變 true」驅動，
@@ -118,7 +136,7 @@ func _physics_process(delta: float) -> void:
 	if _flash > 0.0:
 		_flash -= delta
 		if _flash <= 0.0:
-			_material.emission_enabled = false
+			_flash_done()
 
 	# 倒數在「第一次觀察到 is_broken 變 true」時起算，**不是**在 take_hit 裡設。
 	#
