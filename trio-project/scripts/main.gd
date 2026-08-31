@@ -37,6 +37,15 @@ func _ready() -> void:
 func _apply_cmdline() -> void:
 	var args := OS.get_cmdline_user_args()
 	args.append_array(OS.get_cmdline_args())
+	# 分兩趟：網路模擬一定要在開房／加入之前設好，否則包不到那一層。
+	# 同一趟處理的話，--host --lag=80 這種順序會讓模擬完全沒生效，
+	# 而且不會有任何錯誤訊息——測出來的是假的區網成績。
+	for arg in args:
+		if arg.begins_with("--lag="):
+			NetworkService.sim_latency_ms = float(arg.split("=", true, 1)[1])
+		elif arg.begins_with("--loss="):
+			NetworkService.sim_loss = float(arg.split("=", true, 1)[1])
+
 	for arg in args:
 		if arg == "--host":
 			NetworkService.host_game()

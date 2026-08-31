@@ -30,6 +30,11 @@ const MAX_CLIENTS := 7
 var mode: Mode = Mode.OFFLINE
 var last_error: String = ""
 
+## 網路模擬設定（TD-10）。0 = 關閉。開房／加入的當下生效，中途改不會影響
+## 已經建立的連線——那需要重連，而測試中途換條件本來就會讓結果沒有意義。
+var sim_latency_ms: float = 0.0
+var sim_loss: float = 0.0
+
 
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -46,7 +51,7 @@ func host_game(port: int = DEFAULT_PORT) -> bool:
 	var peer := _create_server_peer(port)
 	if peer == null:
 		return false
-	multiplayer.multiplayer_peer = peer
+	multiplayer.multiplayer_peer = _wrap_simulation(peer)
 	mode = Mode.HOST
 	print("[Net] 開伺服器於 port %d，本機 peer_id = %d" % [port, local_peer_id()])
 	hosted.emit()
@@ -58,7 +63,7 @@ func join_game(address: String = DEFAULT_ADDRESS, port: int = DEFAULT_PORT) -> b
 	var peer := _create_client_peer(address, port)
 	if peer == null:
 		return false
-	multiplayer.multiplayer_peer = peer
+	multiplayer.multiplayer_peer = _wrap_simulation(peer)
 	mode = Mode.CLIENT
 	print("[Net] 連線至 %s:%d ..." % [address, port])
 	return true
@@ -73,6 +78,26 @@ func leave() -> void:
 	mode = Mode.OFFLINE
 	print("[Net] 已離線")
 	disconnected.emit()
+
+
+## 模擬開著就包一層 LagPeer，否則原樣回傳。
+##
+## 兩端都要包：延遲只在收端做，所以 host 包一層負責「host 收到客戶端的封包」，
+## 客戶端包一層負責「客戶端收到 host 的封包」，加起來才是完整的來回延遲。
+func _wrap_simulation(peer: MultiplayerPeer) -> MultiplayerPeer:
+	if sim_latency_ms <= 0.0 and sim_loss <= 0.0:
+		return peer
+	var wrapper := LagPeer.new()
+	wrapper.configure(peer, sim_latency_ms, sim_loss)
+	print("[Net] 網路模擬：延遲 %.0f ms、丟包 %.1f%%" % [sim_latency_ms, sim_loss * 100.0])
+	return wrapper
+
+
+## 目前模擬設定的一行描述，給大廳顯示用。關閉時回空字串。
+func simulation_label() -> String:
+	if sim_latency_ms <= 0.0 and sim_loss <= 0.0:
+		return ""
+	return "延遲 %.0f ms、丟包 %.1f%%" % [sim_latency_ms, sim_loss * 100.0]
 
 
 func is_online() -> bool:

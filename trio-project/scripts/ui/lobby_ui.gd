@@ -8,9 +8,19 @@ extends CanvasLayer
 ## 三層疊高要維持多久才算通過 M0（docs/11、TD-10）。
 const STACK_TARGET := 30.0
 
+## 網路模擬的檔位。中間兩檔正好涵蓋 TD-10 要求的 80–150 ms、1% 丟包。
+## 「區網」那一檔不是為了測驗收，是為了讓人先在寬鬆條件下確認操作沒問題。
+const NETWORK_PRESETS := [
+	{"label": "網路：直連（不模擬）", "latency": 0.0, "loss": 0.0},
+	{"label": "網路：區網 20 ms", "latency": 20.0, "loss": 0.0},
+	{"label": "網路：一般 80 ms／1%（驗收）", "latency": 80.0, "loss": 0.01},
+	{"label": "網路：惡劣 150 ms／3%", "latency": 150.0, "loss": 0.03},
+]
+
 var _status: Label
 var _objective: Label
 var _name: LineEdit
+var _network: OptionButton
 var _slots: Label
 var _stack_best: float = 0.0
 var _stack_now: float = 0.0
@@ -66,6 +76,14 @@ func _build() -> void:
 	_address.placeholder_text = "host 位址"
 	box.add_child(_address)
 
+	# 網路模擬要在開房／加入之前選好——連線建立之後才改是不會生效的，
+	# 所以連上線就鎖住，避免有人以為自己在測驗收條件其實沒有。
+	_network = OptionButton.new()
+	for preset in NETWORK_PRESETS:
+		_network.add_item(String(preset["label"]))
+	_network.item_selected.connect(_on_network_selected)
+	box.add_child(_network)
+
 	var buttons := HBoxContainer.new()
 	box.add_child(buttons)
 
@@ -117,6 +135,12 @@ func _commit_name() -> void:
 	var wanted := _name.text.strip_edges()
 	if not wanted.is_empty():
 		PlayerRegistry.local_display_name = wanted
+
+
+func _on_network_selected(index: int) -> void:
+	var preset: Dictionary = NETWORK_PRESETS[index]
+	NetworkService.sim_latency_ms = float(preset["latency"])
+	NetworkService.sim_loss = float(preset["loss"])
 
 
 func _on_leave_pressed() -> void:
@@ -180,9 +204,17 @@ func _refresh_objective() -> void:
 			lines.append("★ 已通關。下一個目標：三層疊高走動 %.0f 秒" % STACK_TARGET)
 	else:
 		lines.append("目標：想辦法站上北邊的高台（3.6 公尺，跳不上去）")
+	# 驗收句子要自帶條件。只寫「撐了 34 秒」沒有意義——TD-10 要的是
+	# 「在 80 ms、1% 丟包之下撐了 34 秒」。截圖存證時這一行就是證明。
+	var condition := NetworkService.simulation_label()
 	lines.append(
-		"疊高計時：現在 %.1f 秒｜最久 %.1f / %.0f 秒"
-		% [_stack_now, _stack_best, STACK_TARGET]
+		"疊高計時：現在 %.1f 秒｜最久 %.1f / %.0f 秒　（%s）"
+		% [
+			_stack_now,
+			_stack_best,
+			STACK_TARGET,
+			condition if not condition.is_empty() else "未模擬網路",
+		]
 	)
 	if NetworkService.is_host():
 		var addresses := NetworkService.local_addresses()
@@ -199,6 +231,7 @@ func _refresh() -> void:
 	_leave_button.disabled = not online
 	_address.editable = not online
 	_name.editable = not online
+	_network.disabled = online
 
 	# 用 if/elif 而不是 match：autoload 上的 enum 成員不是常數運算式，
 	# 當 match 的 pattern 會被剖析器拒絕。
