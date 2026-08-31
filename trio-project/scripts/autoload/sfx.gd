@@ -6,7 +6,7 @@ extends Node
 ## 密度），但現在整個專案完全無聲。而找音效、處理授權、進版控是另一條產線，
 ## 為了讓朋友這週就能測，先用合成的頂著。
 ##
-## 全部是 22 kHz 單聲道 16-bit，八個音效加起來不到 100 KB，而且不進版控——
+## 全部是 22 kHz 單聲道 16-bit，全部加起來不到 200 KB，而且不進版控——
 ## 每次啟動現算，改一個數字就能聽到差別，不必重新匯出資產。
 ##
 ## 這不是最終音效。等美術與音效正式進來時整層換掉，呼叫端（play 的那些點）
@@ -36,13 +36,14 @@ func _ready() -> void:
 
 ## 在世界的某個位置播放。純表演，各機各自播，不同步——
 ## 聲音跟著已經同步的事件走就夠了。
-func play(id: StringName, position: Vector3, pitch: float = 1.0) -> void:
+func play(id: StringName, position: Vector3, pitch: float = 1.0, volume_db: float = 0.0) -> void:
 	var stream: AudioStreamWAV = _bank.get(id)
 	if stream == null:
 		return
 	var voice := _voices[_next]
 	_next = (_next + 1) % _voices.size()
 	voice.stream = stream
+	voice.volume_db = volume_db
 	voice.global_position = position
 	# 每次都稍微變調，同一個音效連續播才不會像壞掉的機器。
 	voice.pitch_scale = pitch * randf_range(0.94, 1.06)
@@ -71,6 +72,19 @@ func _build_bank() -> void:
 	# 抬不動：短促的低頻悶哼，明確表示「有反應但失敗了」。
 	# 沒有這個的話玩家會以為按鍵壞掉——第一章要教的正是重量規則。
 	_bank[&"strain"] = _sweep(150.0, 105.0, 0.22, 0.03)
+	# 碎裂：docs/05 三層音效的第三層（揮空／命中／碎裂），之前完全不存在——
+	# 殺掉一隻雜兵跟揮空的聽感幾乎一樣，那是「打起來沒感覺」的一大來源。
+	# 噪音給碎片、下掃給「散掉」，最後摻一點很低的上揚當規格說的「小歡呼」：
+	# 壓得很低是刻意的，每打死一隻雜兵都來一次凱旋會很吵。
+	_bank[&"shatter"] = _mix(
+		_mix(_noise(0.30, 0.001, 0.30), _sweep(340.0, 90.0, 0.24, 0.002), 0.60),
+		_arpeggio([784.0, 1047.0], 0.05), 0.85
+	)
+	# 被打中。要跟 hit（我打到別人）明顯不同——混戰時分不出「我打到了」
+	# 還是「我被打了」會很煩躁。這個比較悶、比較長、音高往下。
+	_bank[&"hurt"] = _mix(
+		_sweep(300.0, 155.0, 0.15, 0.003), _noise(0.06, 0.001, 0.5), 0.70
+	)
 
 
 ## 頻率掃描。attack 是起音時間（秒），太短會有喀啦聲。

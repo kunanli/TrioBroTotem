@@ -69,7 +69,8 @@ func _process(_delta: float) -> void:
 
 
 func _collapse() -> void:
-	Sfx.play(&"hit", global_position, 0.7)
+	Sfx.play(&"shatter", global_position, 0.8)
+	Vfx.burst(&"shatter", global_position, Vector3.BACK, 2.0)
 	# 整個層清掉：擋路的那一位（1）與被攻擊判定看得到的那一位（4）都要拿掉，
 	# 只清擋路的話殘骸還會一直吃到攻擊。
 	collision_layer = 0

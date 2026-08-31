@@ -12,6 +12,11 @@
   3. 呼叫 .rpc() / .rpc_id() 的方法真的有 @rpc 標註
   4. .connect() 的回呼函式與訊號都存在
   5. get_nodes_in_group() 用到的群組名有人 add_to_group
+  6. Sfx.play / Vfx.burst / GameInput.rumble 用到的 id 真的有宣告
+
+第 6 項的動機與別項不同：拼錯的 id **完全靜默失敗**（_bank.get(id) 回 null，
+函式直接 return），沒有錯誤訊息、沒有例外，只是那個音效或特效不見了。
+沒有耳朵跟眼睛就永遠不會發現。
 
 被 check_project.py 呼叫，也可以單獨跑：
 
@@ -307,7 +312,52 @@ def run(root):
         problems.append(f'沒有任何地方 add_to_group("{group}")，但有人在讀這個群組')
     notes.append(f"群組：{len(added)} 個加入、{len(used)} 個讀取")
 
+    # --- 6. 表演層的 id（音效、特效、震動）---
+    _check_presentation_ids(script_text, problems, notes)
+
     return problems, notes
+
+
+# 呼叫端的樣式 → (宣告端的檔名, 宣告端的樣式, 這一類叫什麼)
+PRESENTATION_IDS = [
+    (r'Sfx\.play\(\s*&"([^"]+)"', "sfx.gd", r'_bank\[&"([^"]+)"\]', "音效"),
+    (r'Vfx\.burst\(\s*&"([^"]+)"', "vfx.gd", r'_presets\[&"([^"]+)"\]', "特效"),
+    (
+        r'GameInput\.rumble\([^,]+,\s*&"([^"]+)"',
+        "combat_spec.gd",
+        r'^\t&"([^"]+)":\s*\{"weak"',
+        "震動",
+    ),
+]
+
+
+def _check_presentation_ids(script_text, problems, notes):
+    """比對「用到的 id」與「宣告的 id」，兩個方向都看。
+
+    反方向（宣告了但沒人用）只當提示不當錯誤——先寫好音效再接上呼叫端是
+    正常的開發順序，不該擋住 CI。
+    """
+    for call_pattern, source_name, declare_pattern, label in PRESENTATION_IDS:
+        source = next(
+            (text for path, text in script_text.items() if path.name == source_name),
+            None,
+        )
+        if source is None:
+            continue
+        declared = set(re.findall(declare_pattern, source, re.M))
+        used = set()
+        for text in script_text.values():
+            used |= set(re.findall(call_pattern, text))
+        for missing in sorted(used - declared):
+            problems.append(
+                f'{label} id "{missing}" 沒有在 {source_name} 裡宣告'
+                "（拼錯的話是完全靜默失敗，不會有任何錯誤訊息）"
+            )
+        idle = sorted(declared - used)
+        note = f"{label} id：宣告 {len(declared)} 個、用到 {len(used)} 個"
+        if idle:
+            note += f"（還沒接上：{'、'.join(idle)}）"
+        notes.append(note)
 
 
 def main():

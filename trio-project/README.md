@@ -101,6 +101,15 @@ godot --path . -- --join=127.0.0.1
 `CAMERA_FOLLOW_TIME = 0.09`（水平追隨）、`CAMERA_VERTICAL_TIME = 0.28`（垂直追隨）、
 `MOUSE_SENSITIVITY`。
 
+**打擊回饋**：在 `scripts/core/combat_spec.gd`，不在這個檔案——那些數字直接對應
+`docs/05-combat.md` 的規格表，放在一起才一眼看得到全部。
+
+覺得打起來沒感覺，**先只動 `SHAKE_ANGLE` 一個旋鈕**（每一段攻擊的 `shake` 值
+換算成幾弧度的鏡頭偏轉，預設 0.10）。其餘：`SHAKE_TIME` 是震動長度、
+`SHAKE_FREQUENCY` 是震幾下（**不要調超過 15**，60 fps 的畫面每秒只畫 60 次，
+再高就會混疊成雜訊而且每台機器不一樣）、`PUNCH_ATTACK` / `PUNCH_VICTIM` 是
+命中縮放、`RUMBLE` 是手把震動的強度與時長。
+
 **角色看起來太小**有兩個調法，效果不同：把 `CAMERA_DISTANCE_RATIO` 調小是拉近鏡頭，
 會犧牲看到隊友與環境的範圍；把 `CAMERA_FOV` 調小是縮視角，角色變大但廣度損失較少。
 兩者都不想動的話，就改 `assets/source/characters.json` 的身高讓角色相對場景真的變大——

@@ -65,6 +65,8 @@ var character_id: StringName = &""
 var _materials: Array[StandardMaterial3D] = []
 var _flash_timer: float = 0.0
 var _freeze_timer: float = 0.0
+var _punch_amount: float = 0.0
+var _punch_elapsed: float = CombatSpec.PUNCH_TIME
 
 var _player: AnimationPlayer = null
 var _model: Node3D = null
@@ -387,6 +389,23 @@ func freeze(seconds: float) -> void:
 	_freeze_timer = maxf(_freeze_timer, seconds)
 
 
+## 命中縮放（docs/05 的「輕微縮放」）。正數＝拉長，負數＝壓扁。
+##
+## 寫在本節點自己的 scale 上，**不是 _model.scale**——_fit_size() 只在載入時
+## 寫一次 _model.scale 把模型調成名冊身高，兩者是不同節點，互不干擾，
+## 這裡也就不必記住基準值。
+##
+## 而且本節點的原點在角色腳底（player.tscn 把 position.y 設成 -身高/2），
+## 壓扁會往地面壓而不是往中心縮——那正好就是 squash & stretch 要的。
+func punch(amount: float) -> void:
+	# 布娃娃期間不縮放：PhysicalBoneSimulator3D 在非等比縮放的父節點下，
+	# 碰撞形狀的尺寸會算錯，人會開始漂移。
+	if _ragdoll != null and _ragdoll.active:
+		return
+	_punch_amount = amount
+	_punch_elapsed = 0.0
+
+
 func _process(delta: float) -> void:
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
@@ -397,6 +416,21 @@ func _process(delta: float) -> void:
 		_freeze_timer -= delta
 		if _player != null:
 			_player.speed_scale = 0.0 if _freeze_timer > 0.0 else 1.0
+	_tick_punch(delta)
+
+
+## 等體積的擠壓：拉長多少，橫向就縮多少，看起來才像有彈性的東西被打到，
+## 而不是整個人變大變小。
+func _tick_punch(delta: float) -> void:
+	if _punch_elapsed >= CombatSpec.PUNCH_TIME:
+		if scale != Vector3.ONE:
+			scale = Vector3.ONE
+		return
+	_punch_elapsed += delta
+	var remain := 1.0 - clampf(_punch_elapsed / CombatSpec.PUNCH_TIME, 0.0, 1.0)
+	var stretch := 1.0 + _punch_amount * remain * remain
+	var squash := 1.0 / sqrt(maxf(stretch, 0.05))
+	scale = Vector3(squash, stretch, squash)
 
 
 func available() -> PackedStringArray:
@@ -412,6 +446,10 @@ func start_ragdoll(impulse: Vector3) -> bool:
 		_pose.active = false  # 呼吸與看向在倒地時沒有意義，也會跟物理搶
 	if _player != null:
 		_player.stop()  # 動畫還在寫骨骼的話會跟模擬打架
+	# 命中縮放一定要在模擬開始前收乾淨。非等比縮放的父節點會讓
+	# PhysicalBone3D 的碰撞尺寸算錯，人會漂移。
+	_punch_elapsed = CombatSpec.PUNCH_TIME
+	scale = Vector3.ONE
 	_ragdoll.active = true
 	_ragdoll.physical_bones_start_simulation()
 	if _recovery != null:

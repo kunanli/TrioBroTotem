@@ -150,6 +150,7 @@ var _struggle: float = 0.0
 var _next_stack_request: float = 0.0
 var _revive_progress: float = 0.0
 var _previous_fall_speed: float = 0.0
+var _ragdoll_rumble: float = 0.0
 var _base_label: String = ""
 var _intent := PlayerIntent.new()
 
@@ -157,7 +158,16 @@ var _intent := PlayerIntent.new()
 var _camera_yaw: float = 0.0
 var _camera_pitch: float = CAMERA_PITCH_DEFAULT
 var _camera_anchor: Vector3 = Vector3.ZERO
-var _camera_shake: float = 0.0
+
+## 鏡頭震的狀態。強度與經過時間分開存，時長才能與強度解耦（見 CombatSpec）。
+## _shake_seed 讓每一下的相位不同，連擊時才不會每次都震出一模一樣的軌跡。
+var _shake_peak: float = 0.0
+var _shake_elapsed: float = CombatSpec.SHAKE_TIME
+var _shake_seed: Vector2 = Vector2.ZERO
+
+## 沿命中方向的一次性偏轉，已經換算成鏡頭空間的（右, 上）。
+var _kick_screen: Vector2 = Vector2.ZERO
+var _kick_elapsed: float = CombatSpec.KICK_TIME
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
@@ -291,12 +301,59 @@ func _orbit_offset() -> Vector3:
 ## 落後的鏡頭為了盯住角色會額外轉一個角度，整個畫面跟著晃。
 ## 改成只有注視點在平滑，鏡頭就只有位移延遲，沒有轉動晃動。
 func _place_camera() -> void:
-	var jitter := Vector3.ZERO
-	if _camera_shake > 0.0:
-		# 快速衰減。慢衰減會拖節奏，與 Overcooked 基準打架（docs/05）。
-		jitter = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * _camera_shake
-	_camera.global_position = _camera_anchor + _orbit_offset() + jitter
+	_camera.global_position = _camera_anchor + _orbit_offset()
 	_camera.look_at(_camera_anchor, Vector3.UP)
+	var swing := _shake_swing()
+	if swing == Vector2.ZERO:
+		return
+	# 一定要在 look_at **之後**才轉。舊版是在 look_at 之前位移鏡頭，
+	# 而 look_at 每幀重新瞄準沒被震的錨點，等於自己把震動抵銷掉——
+	# 角色因此永遠釘在畫面正中央，只有背景在輕微視差。
+	_camera.rotate_object_local(Vector3.RIGHT, swing.y)
+	_camera.rotate_object_local(Vector3.UP, swing.x)
+	_camera.rotate_object_local(Vector3.BACK, swing.x * CombatSpec.SHAKE_ROLL)
+
+
+## 這一幀的鏡頭偏轉（弧度），x 是左右、y 是上下。
+##
+## 用時間驅動的正弦而不是逐幀 randf：逐幀亂數在 144 fps 是雜訊、在 60 fps 是抖動，
+## 兩台機器看到的根本不是同一件事。兩軸頻率比 1.37 是為了不讓它變成一條斜線。
+func _shake_swing() -> Vector2:
+	var out := Vector2.ZERO
+	var envelope := CombatSpec.shake_envelope(_shake_elapsed)
+	if envelope > 0.0:
+		var phase := _shake_elapsed * CombatSpec.SHAKE_FREQUENCY * TAU
+		var amplitude := _shake_peak * CombatSpec.SHAKE_ANGLE * envelope
+		out += Vector2(
+			sin(phase + _shake_seed.x), sin(phase * 1.37 + _shake_seed.y)
+		) * amplitude
+	if _kick_elapsed < CombatSpec.KICK_TIME:
+		# 二次衰減：出去快、回中更快，讀起來像被推了一下而不是飄回來。
+		var remain := 1.0 - _kick_elapsed / CombatSpec.KICK_TIME
+		out += _kick_screen * CombatSpec.KICK_ANGLE * remain * remain
+	return out
+
+
+## 震一下鏡頭。direction 是世界空間的衝擊方向，Vector3.ZERO 表示不加方向偏轉。
+##
+## 只有本機自己的鏡頭該震。呼叫端要負責過濾——take_hit() 在每一端都會跑，
+## 不過濾的話 30 公尺外隊友被打會震到你的畫面。
+func add_shake(magnitude: float, direction: Vector3 = Vector3.ZERO) -> void:
+	if magnitude <= 0.0:
+		return
+	# 取大的不累加：連擊時累加會越震越誇張，與 Overcooked 基準打架。
+	if _shake_elapsed >= CombatSpec.SHAKE_TIME or magnitude > _shake_peak:
+		_shake_peak = magnitude
+		_shake_elapsed = 0.0
+		_shake_seed = Vector2(randf() * TAU, randf() * TAU)
+	if direction == Vector3.ZERO:
+		return
+	# 換算到鏡頭空間，這樣「往右被打」在畫面上就是往右偏，
+	# 不會像舊版那樣依鏡頭朝向變成推拉。
+	var unit := direction.normalized()
+	var basis := _camera.global_basis
+	_kick_screen = Vector2(basis.x.dot(unit), basis.y.dot(unit))
+	_kick_elapsed = 0.0
 
 
 ## 鏡頭的水平基底。移動輸入要換算到這個座標系——
@@ -350,7 +407,8 @@ func _process(delta: float) -> void:
 	_camera_anchor.x = lerpf(_camera_anchor.x, target.x, horizontal)
 	_camera_anchor.z = lerpf(_camera_anchor.z, target.z, horizontal)
 	_camera_anchor.y = lerpf(_camera_anchor.y, target.y, vertical)
-	_camera_shake = move_toward(_camera_shake, 0.0, delta / CombatSpec.SHAKE_DECAY)
+	_shake_elapsed += delta
+	_kick_elapsed += delta
 	_place_camera()
 
 
@@ -403,6 +461,7 @@ func _physics_process(delta: float) -> void:
 		_process_remote(delta)
 	_visual.rotation.y = _yaw
 	_character.drive(0.0 if is_downed else Vector3(velocity.x, 0.0, velocity.z).length())
+	_tick_ragdoll_rumble(delta)
 	_update_look_target()
 	_update_label()
 
@@ -514,15 +573,37 @@ func _attack_context() -> StringName:
 
 func on_attack_started(spec: Dictionary) -> void:
 	var step: StringName = StringName(str(spec.get("name", "light_1")))
-	_character.play_action(ATTACK_CLIPS.get(step, &"attack1"))
+	var clip: StringName = ATTACK_CLIPS.get(step, &"attack1")
+	var heavy := step == &"heavy_3"
+	_play_swing(clip, heavy)
+	# 攻擊動畫與揮空音本來只在攻擊者自己那台機器上發生：AttackController
+	# 對非權威端直接 return，而 press() 只從 _process_authority 呼叫。
+	# 結果是隊友在你畫面上站著不動、無聲無息，然後泥偶突然飛出去。
+	# 倒地與受擊動畫走 _apply_hit / _apply_down 廣播，一直都有同步，只有攻擊沒有。
+	if multiplayer.has_multiplayer_peer() and multiplayer.get_peers().size() > 0:
+		_play_swing.rpc(clip, heavy)
+
+
+## 揮拳的表演。用 unreliable：掉一次揮空動畫沒差，但塞進可靠通道之後，
+## 80 ms 延遲下會變成一次到一整串，看起來像機器人抽搐。
+## call_remote 而不是 call_local——本機已經自己播過了，再播一次會把動畫重頭跑。
+@rpc("any_peer", "call_remote", "unreliable")
+func _play_swing(clip: StringName, heavy: bool) -> void:
+	_character.play_action(clip)
 	# 第三段是重擊，音調壓低一點，聽得出來跟前兩段不同。
-	Sfx.play(&"whoosh", global_position, 0.85 if step == &"heavy_3" else 1.0)
+	Sfx.play(&"whoosh", global_position, 0.85 if heavy else 1.0)
 
 
 ## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。
-func on_hit_landed(spec: Dictionary) -> void:
-	_camera_shake = maxf(_camera_shake, float(spec.get("shake", 0.0)))
+##
+## direction 是「我打向哪裡」的世界方向，用來讓鏡頭往那個方向頂一下。
+## 方向在本機就算得出來（攻擊者與被打者的位置都在手上），不必等 host 回報。
+func on_hit_landed(spec: Dictionary, direction: Vector3 = Vector3.ZERO) -> void:
+	add_shake(float(spec.get("shake", 0.0)), direction)
 	_character.freeze(float(spec.get("hitstop", 0.0)))
+	_character.punch(CombatSpec.PUNCH_ATTACK)
+	if not is_ai:
+		GameInput.rumble(device_id, &"hit")
 	Sfx.play(&"hit", global_position)
 
 
@@ -531,12 +612,24 @@ func combat_kind() -> StringName:
 
 
 ## 被打到。擊退永遠生效，扣血由 host 依誤傷開關決定（docs/04）。
+##
+## ⚠️ **這個函式在每一端都會跑**（CombatSystem._apply_hit 是 authority + call_local
+## 的廣播）。所以這裡分成兩類，分錯就會很明顯地壞掉：
+##   - 大家都該看到的：白閃、受擊動畫、壓扁、聲音。不設條件。
+##   - 只該發生在「我身上」的：鏡頭震、手把震動。**一定要 gate**，
+##     否則 30 公尺外隊友被打會震你的畫面、抖你的手把。
 func take_hit(damage: float, impulse: Vector3) -> void:
 	_character.flash()
+	_character.punch(CombatSpec.PUNCH_VICTIM)
+	Sfx.play(&"hurt", global_position)
+	Vfx.burst(&"hit_spark", global_position + Vector3.UP * (character_height * 0.55), impulse)
 	if not is_downed:
 		_character.play_action(&"hurt")
 	if is_multiplayer_authority():
 		velocity = impulse
+		if not is_ai:
+			add_shake(CombatSpec.HURT_SHAKE, impulse)
+			GameInput.rumble(device_id, &"hurt")
 	if NetworkService.is_host() and damage > 0.0:
 		DownSystem.apply_damage(slot_id, damage, impulse)
 
@@ -563,6 +656,19 @@ func _process_fall_damage() -> void:
 	# 落地聲的門檻比傷害低得多——輕輕跳一下也該有聲音，那是「我碰到地了」的回饋。
 	if is_on_floor() and _previous_fall_speed > LAND_SOUND_SPEED:
 		Sfx.play(&"land", global_position, 1.0 - minf(_previous_fall_speed / 30.0, 0.3))
+		# 摔得越重震越大。鏡頭震重寫成「時長固定、強度可調」之後，
+		# 這裡才有意義——舊版 0.16 的震動只會持續 29 毫秒，等於沒有。
+		var weight := clampf(
+			inverse_lerp(LAND_SOUND_SPEED, SAFE_FALL_SPEED, _previous_fall_speed), 0.0, 1.0
+		)
+		if not is_ai:
+			add_shake(CombatSpec.LAND_SHAKE_MAX * weight, Vector3.DOWN)
+			GameInput.rumble(device_id, &"land")
+		_character.punch(lerpf(CombatSpec.PUNCH_LAND_MIN, CombatSpec.PUNCH_LAND_MAX, weight))
+		Vfx.burst(
+			&"land_dust", global_position - Vector3.UP * (character_height * 0.5),
+			Vector3.UP, lerpf(0.6, 1.6, weight)
+		)
 	if is_on_floor() and _previous_fall_speed > SAFE_FALL_SPEED:
 		DownSystem.request_fall_damage.rpc_id(1, slot_id, _previous_fall_speed)
 	_previous_fall_speed = falling
@@ -688,9 +794,27 @@ func respawn() -> void:
 func on_revived() -> void:
 	is_downed = false
 	_revive_progress = 0.0
+	_ragdoll_rumble = 0.0
 	_visual.rotation.x = 0.0
 	_character.stop_ragdoll()
+	if is_multiplayer_authority() and not is_ai:
+		GameInput.stop_rumble(device_id)
 	Sfx.play(&"revive", global_position)
+
+
+## 布娃娃期間的持續低頻震動（docs/05 的表）。
+##
+## 不用 duration = 0 的無限震動：那要靠明確的 stop 才會停，遊戲當掉、
+## 斷線或漏掉一個分支就會震到天荒地老。改成每 0.3 秒重發一次固定時長的，
+## 最壞情況 300 毫秒自己停。
+func _tick_ragdoll_rumble(delta: float) -> void:
+	if not is_downed or not is_multiplayer_authority() or is_ai or device_id < 0:
+		return
+	_ragdoll_rumble -= delta
+	if _ragdoll_rumble > 0.0:
+		return
+	_ragdoll_rumble = float(CombatSpec.RUMBLE[&"ragdoll"]["seconds"])
+	GameInput.rumble(device_id, &"ragdoll")
 
 
 ## 倒地時仍受重力與碰撞影響——被丟出去的人要能滾下斜坡，

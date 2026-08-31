@@ -69,8 +69,67 @@ const FRIENDLY_KNOCKBACK := 1.0
 ## 命中白閃的持續時間（docs/05：0.05s）。
 const FLASH_TIME := 0.05
 
-## 鏡頭震的衰減時間。要快——慢衰減會拖節奏，與 Overcooked 基準打架。
-const SHAKE_DECAY := 0.18
+# --- 鏡頭震 -----------------------------------------------------------------
+#
+# 上面每一段攻擊的 shake 是**強度**，下面這幾個是所有攻擊共用的**形狀**。
+#
+# 舊版有三個獨立的毛病疊在一起，任何一個沒解掉都還是看不見：
+#   1. 用 move_toward(shake, 0, delta / SHAKE_DECAY) 衰減——那是「每秒減 5.56」的
+#      速率，不是「0.18 秒衰減完」的時長。輕擊的 0.12 只震 21 毫秒（1.3 幀）。
+#   2. 震動加在鏡頭「位置」上，下一行 look_at 又把鏡頭轉回去對準沒被震的錨點，
+#      角色因此永遠釘在畫面正中央不動——衝擊感要的正是整張畫面一起跳。
+#   3. jitter 是世界座標的 (x, y, 0)，鏡頭轉到看向 ±X 時，x 分量變成推拉鏡頭，
+#      對畫面完全沒貢獻。同一下攻擊，鏡頭朝不同方向震動強度不一樣。
+
+## 震動時長。與強度**解耦**——強弱只差在幅度，不差在長度。
+const SHAKE_TIME := 0.18
+
+## 震動頻率（Hz）。0.18 秒內震盪約 2.5 次。
+##
+## 上限被 60 fps 綁死：**畫面每秒只畫 60 次，震動超過 15 Hz 就會混疊**——
+## 一開始設 26 Hz，實測 60 fps 取樣到的幅度只有 144 fps 的 64%，
+## 而且兩者的軌跡完全不同。那不是「震動」，那是雜訊，而且每台機器不一樣。
+## 14 Hz 在 60 fps 下一個週期有 4.3 個取樣點，畫得出形狀。
+##
+## 下限則是 docs/05 明文禁止的「低頻鏡頭搖晃」（那是 3–6 Hz 的沉重晃動）。
+## 14 Hz 加上 0.18 秒的包絡，快且乾脆，兩邊都不違反。
+const SHAKE_FREQUENCY := 14.0
+
+## 每一段攻擊的 shake 值換算成幾弧度的鏡頭偏轉。這是**調震動大小唯一要動的旋鈕**。
+## 0.10 時重擊（0.30）峰值 1.72°、輕擊（0.12）0.69°。
+const SHAKE_ANGLE := 0.10
+
+## 側傾（roll）佔水平擺動的比例。少量就好，太多會暈。
+const SHAKE_ROLL := 0.35
+
+## 沿命中方向的一次性偏轉，讓震動有方向而不只是亂抖。
+const KICK_TIME := 0.10
+const KICK_ANGLE := 0.16
+
+## 被打中時自己的鏡頭震強度。
+const HURT_SHAKE := 0.26
+
+## 落地的最大鏡頭震（依落下速度內插到這個值）。
+const LAND_SHAKE_MAX := 0.16
+
+# --- 命中縮放（docs/05 的「輕微縮放」）----------------------------------------
+
+const PUNCH_TIME := 0.14
+
+## 正數＝拉長，負數＝壓扁。打中人時攻擊者前頂，被打的一方壓扁。
+const PUNCH_ATTACK := 0.09
+const PUNCH_VICTIM := -0.14
+const PUNCH_LAND_MIN := -0.06
+const PUNCH_LAND_MAX := -0.20
+
+# --- 手把震動（docs/05 的表）-------------------------------------------------
+
+const RUMBLE := {
+	&"hit": {"weak": 0.35, "strong": 0.12, "seconds": 0.08},
+	&"hurt": {"weak": 0.50, "strong": 0.45, "seconds": 0.18},
+	&"ragdoll": {"weak": 0.0, "strong": 0.22, "seconds": 0.30},
+	&"land": {"weak": 0.25, "strong": 0.20, "seconds": 0.10},
+}
 
 
 static func step(index: int) -> Dictionary:
@@ -79,3 +138,13 @@ static func step(index: int) -> Dictionary:
 
 static func knockback_multiplier(kind: StringName) -> float:
 	return KNOCKBACK_BY_KIND.get(kind, FRIENDLY_KNOCKBACK)
+
+
+## 震動包絡，回傳 0..1。
+##
+## 寫成 static 的理由是驗證：headless 探針不必建場景、不必開連線就能逐點取樣，
+## 直接比對「0.17 秒還有值、0.19 秒歸零」。壞掉的舊版沒有這種可驗的形狀。
+static func shake_envelope(elapsed: float) -> float:
+	if elapsed >= SHAKE_TIME or elapsed < 0.0:
+		return 0.0
+	return 1.0 - elapsed / SHAKE_TIME

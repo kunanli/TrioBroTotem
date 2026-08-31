@@ -107,10 +107,21 @@ func _scan_hits() -> void:
 		if not body.has_method("take_hit"):
 			continue
 		_already_hit.append(body)
+		# 命中方向在本機就算得出來，不必等 host 回報——鏡頭要往這個方向頂一下。
+		var direction := body.global_position - _owner.global_position
+		direction.y = 0.0
+		direction = (
+			direction.normalized() if direction.length_squared() > 0.001
+			else -_owner.facing_basis().z
+		)
 		CombatSystem.report_hit.rpc_id(
 			1, _owner.slot_id, str(body.get_path()),
 			float(_spec["damage"]), float(_spec["knockback"])
 		)
+		# 被打的一方在自己那端的反應要等 host 廣播，但攻擊者這端先閃先冒火花——
+		# 這正是 combat_system.gd 註解說的「客戶端可以樂觀播特效，但扣血一律等 host」。
+		if body.has_method("on_hit_predicted"):
+			body.on_hit_predicted(direction)
 		# 命中的頓幀與鏡頭震在本機立刻生效，不等 host——回饋速度優先（docs/05）。
 		_hitstop = float(_spec["hitstop"])
-		_owner.on_hit_landed(_spec)
+		_owner.on_hit_landed(_spec, direction)

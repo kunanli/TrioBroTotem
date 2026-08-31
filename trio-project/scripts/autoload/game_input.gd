@@ -50,6 +50,11 @@ const MOUSE_BINDINGS := {
 ## 搖桿的死區。低於這個值視為沒推。
 const STICK_DEADZONE := 0.2
 
+## 開著的時候把每一次震動記進 rumble_log，給 headless 驗證用。
+## 平常關著——記錄本身沒有副作用，但沒必要在正式遊戲裡一直長。
+var rumble_debug: bool = false
+var rumble_log: Array[Dictionary] = []
+
 ## 手把沒有現成的 just_pressed，自己做邊緣偵測，否則按住會連續觸發。
 var _joy_held: Dictionary = {}
 
@@ -138,3 +143,28 @@ func is_throw_held(device_id: int) -> bool:
 	if device_id < 0:
 		return Input.is_action_pressed(&"attack")
 	return is_pressed(device_id, &"throw")
+
+
+## 手把震動（docs/05 的表：命中＝短促、被擊中＝中等、ragdoll＝持續低頻）。
+##
+## 收在這個檔案而不是各處直接呼 Input.start_joy_vibration，兩個理由：
+##   1. 「device_id < 0 是鍵鼠」這個約定只在這裡定義過一次，散出去就會有人忘記檢查。
+##   2. GDScript 攔截不了引擎單例，**可觀測性必須建在呼叫邊界上**——
+##      不包一層的話，headless 驗不到誰在什麼時候震了多久。
+##
+## 呼叫端要自己確認「這是本機玩家的事」。take_hit() 之類的函式在每一端都會跑，
+## 不過濾的話，30 公尺外隊友被打會抖到你的手把。
+func rumble(device_id: int, id: StringName) -> void:
+	if device_id < 0 or not CombatSpec.RUMBLE.has(id):
+		return
+	var preset: Dictionary = CombatSpec.RUMBLE[id]
+	if rumble_debug:
+		rumble_log.append({"device": device_id, "id": id, "at": Time.get_ticks_msec()})
+	Input.start_joy_vibration(
+		device_id, preset["weak"], preset["strong"], preset["seconds"]
+	)
+
+
+func stop_rumble(device_id: int) -> void:
+	if device_id >= 0:
+		Input.stop_joy_vibration(device_id)

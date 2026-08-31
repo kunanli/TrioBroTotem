@@ -19,6 +19,13 @@ const DESPAWN_DELAY := 2.5
 const WANDER_SPEED := 1.2
 const WANDER_INTERVAL := 2.0
 
+## 被打中之後先頓住多久才飛出去。
+##
+## 泥偶沒有 AnimationPlayer，所以「頓幀」對它而言就是**把擊退按住幾幀**：
+## 衝擊先讀出來，然後才發射。只有 host 跑物理、客戶端靠 net_position 跟，
+## 所以這個停頓不必多加同步欄位就會自動複製過去。
+const HITSTOP := 3.0 / 60.0
+
 var net_position: Vector3 = Vector3.ZERO
 var is_broken: bool = false
 
@@ -27,10 +34,23 @@ var _gone := false
 var _wander := Vector3.ZERO
 var _wander_timer := 0.0
 var _despawn := 0.0
+var _hitstop := 0.0
+var _broken_seen := false
+var _flash := 0.0
+var _material: StandardMaterial3D = null
+
+@onready var _mesh: MeshInstance3D = $Mesh
 
 
 func _ready() -> void:
 	add_to_group("enemies")
+	# 一定要 duplicate。mud_puppet.tscn 的材質是 [sub_resource] 而且沒有
+	# resource_local_to_scene，PackedScene 的每一個實例共用同一份——
+	# 直接改的話打一隻會四隻一起白閃。
+	# 同樣的坑在 player_character.gd 的碰撞形狀與 character_visual.gd 的
+	# 材質快取已經各踩過一次了。
+	_material = _mesh.material_override.duplicate()
+	_mesh.material_override = _material
 	_setup_synchronizer()
 	set_multiplayer_authority(1)
 	net_position = global_position
@@ -55,19 +75,64 @@ func combat_kind() -> StringName:
 
 
 ## 一擊即散（docs/05）。damage 不看數值，泥偶碰到就散。
+##
+## 這個函式在每一端都會跑（CombatSystem._apply_hit 是廣播），所以表演寫在
+## _on_broken() 裡由狀態驅動，這裡只負責改狀態。
 func take_hit(_damage: float, impulse: Vector3) -> void:
 	if is_broken:
 		return
 	is_broken = true
 	velocity = impulse
-	_despawn = DESPAWN_DELAY
+	_hitstop = HITSTOP
+
+
+## 攻擊者在本機的樂觀回饋，不等 host 確認。
+##
+## 這正是 combat_system.gd 註解說的那條路：「客戶端可以樂觀播特效，
+## 但扣血一律等 host」。攻擊者 0 毫秒就看到閃光與火花，其他人 RTT 之後看到。
+func on_hit_predicted(direction: Vector3) -> void:
+	if is_broken or _broken_seen:
+		return
+	_flash_now()
+	Vfx.burst(&"hit_spark", global_position + Vector3.UP * 0.4, direction)
+
+
+func _flash_now() -> void:
+	_flash = CombatSpec.FLASH_TIME
+	_material.emission_enabled = true
+	_material.emission = Color.WHITE
+	_material.emission_energy_multiplier = 1.6
+
+
+## 被打中的那一刻，每一端各自播。用「第一次看到 is_broken 變 true」驅動，
+## 不是在 take_hit 裡直接播——理由見 _physics_process。
+func _on_broken() -> void:
+	_flash_now()
+	Sfx.play(&"hit", global_position)
 
 
 func _physics_process(delta: float) -> void:
+	if _flash > 0.0:
+		_flash -= delta
+		if _flash <= 0.0:
+			_material.emission_enabled = false
+
+	# 倒數在「第一次觀察到 is_broken 變 true」時起算，**不是**在 take_hit 裡設。
+	#
+	# is_broken 同時走兩條路到客戶端：MultiplayerSynchronizer（20 Hz）與
+	# CombatSystem._apply_hit 這個 reliable RPC。兩條是不同的 ENet 通道，
+	# 沒有先後保證。同步先到的那一端會拿到 is_broken = true 而 _despawn = 0，
+	# 下一個 tick 就直接 _vanish()——host 看到 2.5 秒的拋物線，
+	# 那台機器看到泥偶原地閃掉。晚加入的玩家也必然踩到。
+	if is_broken and not _broken_seen:
+		_broken_seen = true
+		_despawn = DESPAWN_DELAY
+		_on_broken()
+
 	# 消失的倒數每一端各自跑。不能用 queue_free——泥偶是場景擺好的節點，
 	# 不是 MultiplayerSpawner 生成的，host 刪掉不會複製到客戶端，
 	# 結果就是 host 看到消失、客戶端還站著一隻。
-	if is_broken and not _gone:
+	if _broken_seen and not _gone:
 		_despawn -= delta
 		if _despawn <= 0.0:
 			_vanish()
@@ -77,6 +142,11 @@ func _physics_process(delta: float) -> void:
 			global_position = net_position
 		else:
 			global_position = global_position.lerp(net_position, 1.0 - exp(-REMOTE_LERP * delta))
+		return
+
+	# 頓一下再飛。位置不動，net_position 也就不動，客戶端自然跟著停。
+	if _hitstop > 0.0:
+		_hitstop -= delta
 		return
 
 	if not is_on_floor():
@@ -96,8 +166,13 @@ func _physics_process(delta: float) -> void:
 
 ## 收起來而不是刪除。之後接上「被黏合的動物打倒後變回動物跑掉」（docs/05）
 ## 時，這裡就是那段演出的位置。
+##
+## 碎屑是純本機表演，各端自己生成、自己回收，不進同步——每一端都是由
+## 同步過的 is_broken 驅動走到這裡的，時間點本來就一致。
 func _vanish() -> void:
 	_gone = true
+	Vfx.burst(&"shatter", global_position + Vector3.UP * 0.4, Vector3.UP)
+	Sfx.play(&"shatter", global_position)
 	visible = false
 	set_collision_layer_value(4, false)
 
