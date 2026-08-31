@@ -309,6 +309,30 @@ func is_carrying() -> bool:
 	return CarrySystem.held_carryable(slot_id) != null
 
 
+## 給場景中的互動物件（任務看板之類）問的。
+##
+## 只有本機有權威的角色才會有意圖——遠端角色的 _intent 每幀都被清空
+## （見 _physics_process），問了永遠是 false。
+func wants_interact() -> bool:
+	return is_multiplayer_authority() and not is_ai and _intent.interact
+
+
+## 換場之後把角色放到新世界的出生點。
+##
+## 一定要連 spawn_position 一起改，否則按 R 脫困會把人送回上一張地圖的座標，
+## 也就是新世界裡的隨便一個地方（通常是空中或牆裡）。
+func teleport_to(target: Vector3) -> void:
+	if StackSystem.is_stacked(slot_id):
+		StackSystem.detach(slot_id)
+	StackSystem.collapse_above(slot_id)
+	spawn_position = target
+	global_position = target
+	velocity = Vector3.ZERO
+	net_position = target
+	net_velocity = Vector3.ZERO
+	_clear_air_state()
+
+
 func _physics_process(delta: float) -> void:
 	# 意圖每幀只收集一次。手把的 just_pressed 是自己做的邊緣偵測，
 	# 在不同分支各問一次會把狀態吃掉，按鍵就會時靈時不靈。

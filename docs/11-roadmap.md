@@ -103,7 +103,21 @@
 
 鏡頭同時拆成 `scripts/player/player_camera.gd`，`player_character.gd` 破千行了。
 
+**流程那一輪**：開始畫面 → 營地 → 任務關卡（docs/08 的流程圖）。營地是灰盒，
+有出生點、練習用的箱子與原木、營火、帳篷、任務看板。走到看板前按互動出發，
+通關之後自動回營地（docs/08 的「失敗回歸點」）。
+
+換場**不用 change_scene_to_file**，只換 `World` 底下的子樹——整個場景換掉會連
+`Players` 與 `MultiplayerSpawner` 一起銷毀重建，而 `CombatSystem.report_hit`
+傳的是節點路徑字串，那些路徑會全部失效。
+
 缺的是環境音與背景音樂、HUD（docs/06 那一套）、關卡的視覺層次。
+
+**已知問題**：第三個人連進來時，客戶端會噴一次
+`MultiplayerSynchronizer ... unable to process the pending spawn since it has
+no network ID`。實測在流程改動之前就存在，起因是名冊換手時 `reassign()` 會在
+別人還在處理 spawn 的當下改權威。只噴一次、不影響遊玩，但要修得動到 TD-04
+的接手流程，另外處理。
 
 ---
 

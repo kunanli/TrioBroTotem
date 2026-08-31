@@ -424,13 +424,28 @@ func _process(delta: float) -> void:
 func _tick_punch(delta: float) -> void:
 	if _punch_elapsed >= CombatSpec.PUNCH_TIME:
 		if scale != Vector3.ONE:
-			scale = Vector3.ONE
+			_write_punch(Vector3.ONE)
 		return
 	_punch_elapsed += delta
 	var remain := 1.0 - clampf(_punch_elapsed / CombatSpec.PUNCH_TIME, 0.0, 1.0)
 	var stretch := 1.0 + _punch_amount * remain * remain
 	var squash := 1.0 / sqrt(maxf(stretch, 0.05))
-	scale = Vector3(squash, stretch, squash)
+	_write_punch(Vector3(squash, stretch, squash))
+
+
+## 縮放要連布娃娃的模擬器一起反向抵銷。
+##
+## PhysicalBoneSimulator3D 是骨架的子節點，所以它整個在這個節點的縮放底下。
+## 非等比縮放的父節點會讓 Jolt 每一幀對每一根骨頭噴一次
+## 「Failed to correctly scale body」——**平時沒倒地也會噴**，因為那些
+## PhysicalBone3D 從模型載入的那一刻就存在，不是倒地才生出來的。
+##
+## 給模擬器乘上反向的縮放，骨頭的世界縮放就回到等比，Jolt 不再抱怨，
+## 而網格照樣被壓扁——壓扁本來就只是表演。
+func _write_punch(value: Vector3) -> void:
+	scale = value
+	if _ragdoll != null:
+		_ragdoll.scale = Vector3(1.0 / value.x, 1.0 / value.y, 1.0 / value.z)
 
 
 func available() -> PackedStringArray:
@@ -449,7 +464,7 @@ func start_ragdoll(impulse: Vector3) -> bool:
 	# 命中縮放一定要在模擬開始前收乾淨。非等比縮放的父節點會讓
 	# PhysicalBone3D 的碰撞尺寸算錯，人會漂移。
 	_punch_elapsed = CombatSpec.PUNCH_TIME
-	scale = Vector3.ONE
+	_write_punch(Vector3.ONE)
 	_ragdoll.active = true
 	_ragdoll.physical_bones_start_simulation()
 	if _recovery != null:

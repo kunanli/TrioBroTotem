@@ -26,6 +26,7 @@ DownSystem="*res://scripts/autoload/down_system.gd"
 CombatSystem="*res://scripts/autoload/combat_system.gd"
 Sfx="*res://scripts/autoload/sfx.gd"
 Vfx="*res://scripts/autoload/vfx.gd"
+GameFlow="*res://scripts/autoload/game_flow.gd"
 
 [display]
 

@@ -19,9 +19,11 @@ M0 技術驗證原型。全程膠囊體：**零美術、零動畫、零 shader**
 
 ```
 scenes/
-  main.tscn              進入點：World + Players + PlayerSpawner + LobbyUI
+  main.tscn              進入點：World（換場時換的就是這一層）+ Players
+                         + PlayerSpawner + TitleUI + LobbyUI
   player/player.tscn     膠囊角色（含跟隨鏡頭、抓取偵測、攜帶錨點）
-  world/test_arena.tscn  測試場地（含三個箱子與一顆石頭）
+  world/camp.tscn        營地：出生點、練習道具、營火、任務看板
+  world/test_arena.tscn  第一章「藤蔓谷地」灰盒
   world/crate.tscn       可搬物件
 scripts/
   autoload/
@@ -35,8 +37,11 @@ scripts/
     carryable.gd         可被抓起的元件（玩家與場景物件共用）
   player/player_character.gd  TD-02：自己的角色自己算，其他人插值
   world/prop.gd          host 權威的場景物理物件
-  main.gd                名冊 → 場上角色
-  ui/lobby_ui.gd         開發用連線面板（不是 HUD）
+    game_flow.gd         開始畫面 → 營地 → 任務關卡，host 權威
+  world/mission_board.gd 走過去按互動就出發
+  main.gd                名冊 → 場上角色；換場時抽換 World 子樹
+  ui/title_ui.gd         開始畫面（連線控制全在這裡）
+  ui/lobby_ui.gd         遊戲中的面板（不是 HUD）
 ```
 
 ## 怎麼跑
@@ -89,6 +94,23 @@ godot --path . -- --join=127.0.0.1
 
 膠囊前面那塊小方塊是朝向指示。
 
+### 遊戲流程
+
+開始畫面 → 營地 → 任務關卡（docs/08 的流程圖）。
+
+1. **開始畫面**：填名字，一個人按「開一個房間」，其他人填他的位址按「加入」。
+   網路模擬的檔位也在這裡選——連上線之後才改是不會生效的。
+2. **營地**：連上就會一起出現在這裡。可以自由練抓、丟、疊、推，
+   場地上有箱子、石頭與一根原木。
+3. **出任務**：走到北邊的任務看板前面，按 E（手把 LT）出發。任何人都可以按。
+4. **回營地**：通關之後幾秒自動回營地，可以再出發一次。
+
+換場只換 `World` 底下的子樹，不是 `change_scene_to_file`——整個場景換掉會連
+`Players` 與 `MultiplayerSpawner` 一起銷毀，而戰鬥系統傳的是節點路徑字串。
+
+中途加入的人會被拉到當下的階段（host 在對方連上時補送一次），
+所以任務打到一半有人連進來，他會直接出現在關卡裡而不是卡在營地。
+
 ### 手感參數在哪
 
 全部在 `player_character.gd` 最上面，改完不用重開，Godot 會熱載入。
@@ -122,14 +144,14 @@ godot --path . -- --join=127.0.0.1
 再高就會混疊成雜訊而且每台機器不一樣）、`PUNCH_ATTACK` / `PUNCH_VICTIM` 是
 命中縮放、`RUMBLE` 是手把震動的強度與時長。
 
-**角色看起來太小**有兩個調法，效果不同：把 `CAMERA_DISTANCE_RATIO` 調小是拉近鏡頭，
-會犧牲看到隊友與環境的範圍；把 `CAMERA_FOV` 調小是縮視角，角色變大但廣度損失較少。
+**角色看起來太小**有兩個調法，效果不同：把 `DISTANCE_RATIO` 調小是拉近鏡頭，
+會犧牲看到隊友與環境的範圍；把 `FIELD_OF_VIEW` 調小是縮視角，角色變大但廣度損失較少。
 兩者都不想動的話，就改 `assets/source/characters.json` 的身高讓角色相對場景真的變大——
 那需要重跑 `normalize-all`。
 
 垂直刻意比水平慢三倍——兩者相同的話，跳躍與走斜坡時鏡頭會跟著上下彈，
 那是第三人稱最明顯的暈眩來源。覺得跳躍時鏡頭反應太慢就把
-`CAMERA_VERTICAL_TIME` 調小，覺得晃就調大。
+`VERTICAL_TIME` 調小，覺得晃就調大。
 
 物理跑 **120 Hz**（`project.godot`）。角色的移動是在物理幀更新的，
 60 Hz 在高刷新率螢幕上看得出一格一格跳——鏡頭做了平滑之後反而更明顯。

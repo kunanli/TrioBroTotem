@@ -17,6 +17,7 @@ const SPAWN_POINTS: Array[Vector3] = [
 	Vector3(2.5, 1.2, 0.0),
 ]
 
+@onready var _world: Node3D = $World
 @onready var _players_root: Node3D = $Players
 @onready var _spawner: MultiplayerSpawner = $PlayerSpawner
 
@@ -25,7 +26,38 @@ func _ready() -> void:
 	_spawner.spawn_function = _spawn_player
 	PlayerRegistry.slots_changed.connect(_on_slots_changed)
 	NetworkService.disconnected.connect(_clear_players)
+	GameFlow.phase_changed.connect(_on_phase_changed)
 	_apply_cmdline()
+
+
+## 換世界。**只換 World 底下的子樹，不換整個場景**——理由見 game_flow.gd：
+## change_scene_to_file 會連 Players 與 MultiplayerSpawner 一起銷毀，
+## 而 CombatSystem 傳的是節點路徑字串，那些路徑會全部失效。
+##
+## 每一端各自載入同一個場景檔，所以節點路徑在三台機器上是一樣的——
+## 這是「只廣播階段、不同步世界內容」能成立的前提。
+func _on_phase_changed(phase: int) -> void:
+	for child in _world.get_children():
+		# 先 remove 再 free：queue_free 是延後的，不先移出去的話
+		# 新舊兩個世界會在同一幀共存，物理與出生點都會讀到舊的那一份。
+		_world.remove_child(child)
+		child.queue_free()
+	var path := GameFlow.world_path(phase)
+	if not path.is_empty():
+		var scene: PackedScene = load(path)
+		_world.add_child(scene.instantiate())
+	_place_players()
+
+
+## 換世界之後把角色搬到新世界的出生點。
+##
+## 每一端只搬自己有權威的那些——host 去寫客戶端角色的位置沒有用，
+## 下一個同步封包就會被 net_position 蓋回去。
+func _place_players() -> void:
+	for child in _players_root.get_children():
+		var player: PlayerCharacter = child
+		if player.is_multiplayer_authority():
+			player.teleport_to(_spawn_point(player.slot_id))
 
 
 ## 讓多開不用每次都手動點按鈕：
