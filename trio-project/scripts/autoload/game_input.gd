@@ -79,22 +79,36 @@ func _ready() -> void:
 func get_move_vector(device_id: int) -> Vector2:
 	if device_id < 0:
 		return Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var raw := Vector2(
+	return _apply_deadzone(Vector2(
 		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
 		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
-	)
-	return raw if raw.length() > STICK_DEADZONE else Vector2.ZERO
+	))
 
 
 ## 手把的鏡頭輸入（右搖桿，見 docs/06）。滑鼠走 _unhandled_input，不在這裡。
 func get_look_delta(device_id: int) -> Vector2:
 	if device_id < 0:
 		return Vector2.ZERO
-	var raw := Vector2(
+	return _apply_deadzone(Vector2(
 		Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
 		Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
-	)
-	return raw if raw.length() > STICK_DEADZONE else Vector2.ZERO
+	))
+
+
+## 死區之後要**重新歸一化**。
+##
+## 舊寫法是「長度超過 0.2 就原樣回傳」——所以剛好推過死區的那一刻，
+## 輸出直接從 0 跳到 0.2，角色從靜止變成 1.2 m/s。微推搖桿走不出慢速，
+## 只有「不動」跟「一下就衝出去」兩種狀態。
+##
+## 歸一化之後，死區邊緣輸出 0、推到底輸出 1，中間是連續的。
+func _apply_deadzone(raw: Vector2) -> Vector2:
+	var length := raw.length()
+	if length <= STICK_DEADZONE:
+		return Vector2.ZERO
+	# 方形閘的搖桿對角線可以到 1.41，夾住之後再換算。
+	var scaled := inverse_lerp(STICK_DEADZONE, 1.0, minf(length, 1.0))
+	return raw / length * scaled
 
 
 func is_pressed(device_id: int, action: StringName) -> bool:

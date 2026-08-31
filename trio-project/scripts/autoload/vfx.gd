@@ -118,6 +118,13 @@ func _build_presets() -> void:
 		"speed_min": 1.0, "speed_max": 2.4, "damping": 3.0, "size": 0.22,
 		"colors": [Color(0.72, 0.68, 0.6, 0.55), Color(0.72, 0.68, 0.6, 0.0)], "additive": false,
 	})
+	# 腳步的小揚塵。跟落地同一個色系但小得多——這個一秒會冒好幾次，
+	# 大一點就會變成角色拖著一團霧在走。
+	_presets[&"step_puff"] = _preset({
+		"amount": 3, "lifetime": 0.22, "spread": 60.0, "gravity": Vector3(0.0, 0.4, 0.0),
+		"speed_min": 0.5, "speed_max": 1.2, "damping": 4.0, "size": 0.09,
+		"colors": [Color(0.72, 0.68, 0.6, 0.4), Color(0.72, 0.68, 0.6, 0.0)], "additive": false,
+	})
 
 
 func _preset(config: Dictionary) -> Dictionary:

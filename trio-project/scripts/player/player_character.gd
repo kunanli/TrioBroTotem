@@ -20,6 +20,16 @@ const ACCEL_TIME := 0.10   ## 靜止到全速
 const STOP_TIME := 0.07    ## 全速到靜止，比加速更快，急停才俐落
 const TURN_TIME := 0.07    ## 轉向到位
 
+## 離開地面之後還有多久可以跳，以及提早按跳會被記住多久。
+##
+## 物理跑 120 Hz——沒有這兩個的話，早按或晚按**一個 tick（8.3 毫秒）**
+## 就整個丟掉，而人根本按不準到 8 毫秒。本作的核心動詞正是「疊高跳上平台」，
+## 那是最需要抓準時機的動作，也就最需要這兩個緩衝。
+##
+## 0.12 秒是常見的取值：足以蓋掉人類的反應誤差，又短到不會變成「二段跳」。
+const COYOTE_TIME := 0.12
+const JUMP_BUFFER := 0.12
+
 ## 空中還保有多少控制力。0 = 完全不能轉向，1 = 與地面相同。
 ## 太高的話被丟出去的人可以自己飛回來，投擲就沒意義了。
 const AIR_CONTROL := 0.25
@@ -57,6 +67,23 @@ const LAND_SOUND_SPEED := 3.0
 const SAFE_FALL_SPEED := 11.0
 const FALL_DAMAGE_PER_SPEED := 9.0
 
+## 起跳時身體拉長的量（與命中縮放共用同一個通道，正數＝拉長）。
+const JUMP_STRETCH := 0.10
+
+## 腳步的步幅＝身高 × 這個比例。矮的動物步伐短，節奏才對得上。
+const STRIDE_RATIO := 0.62
+
+## 慢到這個速度以下就不出腳步聲——輕微的推擠或滑動不該一直踩。
+const STEP_MIN_SPEED := 1.2
+
+## 腳步的音量。一秒會響好幾次，一定要壓得比其他音效低很多。
+const STEP_VOLUME_DB := -15.0
+
+## 移動傾斜：橫向加速與轉向時身體往內傾多少（弧度）。
+## 純表演，不影響碰撞——傾斜的是 Visual，不是 CharacterBody3D。
+const LEAN_MAX := 0.16
+const LEAN_TIME := 0.12
+
 ## 扶起隊友要按住多久（與 DownSystem.REVIVE_TIME 對齊）。
 const REVIVE_RANGE := 2.2
 
@@ -81,30 +108,7 @@ const DOWNED_PITCH := -80.0
 const STACK_PROBE_LENGTH := 0.5
 const STACK_REQUEST_INTERVAL := 0.2
 
-## --- 鏡頭 ---
-## 距離與注視高度都用「角色身高的幾倍／幾成」表示，不用絕對值——
-## 三隻身高差 1.4 到 1.7 公尺，固定值會讓矮的看起來特別遠、高的被切到頭。
-##
-## 覺得角色太小：把 CAMERA_DISTANCE_RATIO 調小（拉近），
-## 或把 CAMERA_FOV 調小（縮視角，等於拉近但比較不犧牲看隊友的範圍）。
-const CAMERA_DISTANCE_RATIO := 3.1
-const CAMERA_TARGET_RATIO := 0.7
-
-## 水平與垂直分開追隨，垂直**刻意慢很多**。
-## 用同一個值的話，跳躍與走斜坡時鏡頭會跟著上下彈——那是最明顯的暈眩來源。
-const CAMERA_FOLLOW_TIME := 0.09
-const CAMERA_VERTICAL_TIME := 0.28
-
-## 仰角範圍（弧度）。下限不設負太多，否則鏡頭會鑽到地板下面。
-const CAMERA_PITCH_MIN := -0.10
-const CAMERA_PITCH_MAX := 1.15
-const CAMERA_PITCH_DEFAULT := 0.42
-
-## 視野角度。Godot 預設 75 偏廣，主角會顯得小又遠。
-const CAMERA_FOV := 62.0
-
-const MOUSE_SENSITIVITY := 0.0032
-const STICK_LOOK_SPEED := 2.6
+## 鏡頭的參數全部搬到 player_camera.gd。這個檔案只負責「要看誰」跟「震多大」。
 
 const SLOT_COLORS := [
 	Color(0.90, 0.42, 0.32),  # 0 泥土色
@@ -151,23 +155,14 @@ var _next_stack_request: float = 0.0
 var _revive_progress: float = 0.0
 var _previous_fall_speed: float = 0.0
 var _ragdoll_rumble: float = 0.0
+var _coyote: float = 0.0
+var _jump_buffer: float = 0.0
+var _step_distance: float = 0.0
+var _was_grounded: bool = true
+var _lean: Vector2 = Vector2.ZERO
+var _last_horizontal: Vector3 = Vector3.ZERO
 var _base_label: String = ""
 var _intent := PlayerIntent.new()
-
-## 鏡頭角度與追隨中的注視點。純本機狀態，不同步——每個人的鏡頭本來就該各自獨立。
-var _camera_yaw: float = 0.0
-var _camera_pitch: float = CAMERA_PITCH_DEFAULT
-var _camera_anchor: Vector3 = Vector3.ZERO
-
-## 鏡頭震的狀態。強度與經過時間分開存，時長才能與強度解耦（見 CombatSpec）。
-## _shake_seed 讓每一下的相位不同，連擊時才不會每次都震出一模一樣的軌跡。
-var _shake_peak: float = 0.0
-var _shake_elapsed: float = CombatSpec.SHAKE_TIME
-var _shake_seed: Vector2 = Vector2.ZERO
-
-## 沿命中方向的一次性偏轉，已經換算成鏡頭空間的（右, 上）。
-var _kick_screen: Vector2 = Vector2.ZERO
-var _kick_elapsed: float = CombatSpec.KICK_TIME
 
 @onready var carry_anchor: Node3D = $Visual/CarryAnchor
 @onready var grab_probe: Area3D = $Visual/GrabProbe
@@ -179,7 +174,7 @@ var _kick_elapsed: float = CombatSpec.KICK_TIME
 @onready var _collision: CollisionShape3D = $Collision
 @onready var _visual: Node3D = $Visual
 @onready var _label: Label3D = $NameLabel
-@onready var _camera: Camera3D = $Camera3D
+@onready var _camera: PlayerCamera = $Camera3D
 @onready var _carryable: Carryable = $Carryable
 
 
@@ -208,10 +203,7 @@ func _ready() -> void:
 	_camera.current = is_multiplayer_authority() and not is_ai
 	# 鏡頭脫離角色的座標系，改成自己平滑追上去。
 	# 硬綁在角色身上時，角色每個物理幀的位移會原封不動變成鏡頭的抖動。
-	_camera.top_level = true
-	_camera.fov = CAMERA_FOV
-	_camera_anchor = _focus_target()
-	_place_camera()
+	_camera.bind(self)
 
 	if is_multiplayer_authority():
 		net_position = global_position
@@ -280,138 +272,6 @@ func _setup_character() -> void:
 		push_warning("[Player] %s 的模型載入失敗，保留膠囊" % character_id)
 
 
-## 鏡頭要對準的點：角色身上稍高的位置，不是腳底。
-func _focus_target() -> Vector3:
-	return global_position + Vector3.UP * (character_height * CAMERA_TARGET_RATIO)
-
-
-func _camera_distance() -> float:
-	return character_height * CAMERA_DISTANCE_RATIO
-
-
-## 鏡頭相對於注視點的位移。
-func _orbit_offset() -> Vector3:
-	var arm := Vector3(0.0, sin(_camera_pitch), cos(_camera_pitch)) * _camera_distance()
-	return Basis(Vector3.UP, _camera_yaw) * arm
-
-
-## 位置與注視點一起由 _camera_anchor 推導，兩者永遠剛性綁在一起。
-##
-## 之前的做法是位置做平滑、注視點直接用角色當下位置——角色橫move 時，
-## 落後的鏡頭為了盯住角色會額外轉一個角度，整個畫面跟著晃。
-## 改成只有注視點在平滑，鏡頭就只有位移延遲，沒有轉動晃動。
-func _place_camera() -> void:
-	_camera.global_position = _camera_anchor + _orbit_offset()
-	_camera.look_at(_camera_anchor, Vector3.UP)
-	var swing := _shake_swing()
-	if swing == Vector2.ZERO:
-		return
-	# 一定要在 look_at **之後**才轉。舊版是在 look_at 之前位移鏡頭，
-	# 而 look_at 每幀重新瞄準沒被震的錨點，等於自己把震動抵銷掉——
-	# 角色因此永遠釘在畫面正中央，只有背景在輕微視差。
-	_camera.rotate_object_local(Vector3.RIGHT, swing.y)
-	_camera.rotate_object_local(Vector3.UP, swing.x)
-	_camera.rotate_object_local(Vector3.BACK, swing.x * CombatSpec.SHAKE_ROLL)
-
-
-## 這一幀的鏡頭偏轉（弧度），x 是左右、y 是上下。
-##
-## 用時間驅動的正弦而不是逐幀 randf：逐幀亂數在 144 fps 是雜訊、在 60 fps 是抖動，
-## 兩台機器看到的根本不是同一件事。兩軸頻率比 1.37 是為了不讓它變成一條斜線。
-func _shake_swing() -> Vector2:
-	var out := Vector2.ZERO
-	var envelope := CombatSpec.shake_envelope(_shake_elapsed)
-	if envelope > 0.0:
-		var phase := _shake_elapsed * CombatSpec.SHAKE_FREQUENCY * TAU
-		var amplitude := _shake_peak * CombatSpec.SHAKE_ANGLE * envelope
-		out += Vector2(
-			sin(phase + _shake_seed.x), sin(phase * 1.37 + _shake_seed.y)
-		) * amplitude
-	if _kick_elapsed < CombatSpec.KICK_TIME:
-		# 二次衰減：出去快、回中更快，讀起來像被推了一下而不是飄回來。
-		var remain := 1.0 - _kick_elapsed / CombatSpec.KICK_TIME
-		out += _kick_screen * CombatSpec.KICK_ANGLE * remain * remain
-	return out
-
-
-## 震一下鏡頭。direction 是世界空間的衝擊方向，Vector3.ZERO 表示不加方向偏轉。
-##
-## 只有本機自己的鏡頭該震。呼叫端要負責過濾——take_hit() 在每一端都會跑，
-## 不過濾的話 30 公尺外隊友被打會震到你的畫面。
-func add_shake(magnitude: float, direction: Vector3 = Vector3.ZERO) -> void:
-	if magnitude <= 0.0:
-		return
-	# 取大的不累加：連擊時累加會越震越誇張，與 Overcooked 基準打架。
-	if _shake_elapsed >= CombatSpec.SHAKE_TIME or magnitude > _shake_peak:
-		_shake_peak = magnitude
-		_shake_elapsed = 0.0
-		_shake_seed = Vector2(randf() * TAU, randf() * TAU)
-	if direction == Vector3.ZERO:
-		return
-	# 換算到鏡頭空間，這樣「往右被打」在畫面上就是往右偏，
-	# 不會像舊版那樣依鏡頭朝向變成推拉。
-	var unit := direction.normalized()
-	var basis := _camera.global_basis
-	_kick_screen = Vector2(basis.x.dot(unit), basis.y.dot(unit))
-	_kick_elapsed = 0.0
-
-
-## 鏡頭的水平基底。移動輸入要換算到這個座標系——
-## 世界座標移動配上不會轉的鏡頭，在 3D 第三人稱裡一定會覺得怪。
-func _camera_basis() -> Basis:
-	return Basis(Vector3.UP, _camera_yaw)
-
-
-## 用 _unhandled_input 而不是 _input：UI 已經處理掉的點擊不會流到這裡，
-## 所以點大廳按鈕不會順便鎖住滑鼠。
-func _unhandled_input(event: InputEvent) -> void:
-	if not _camera.current:
-		return
-
-	if event.is_action_pressed(&"ui_cancel"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		return
-
-	var click := event as InputEventMouseButton
-	if click != null and click.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		# 點進畫面就鎖滑鼠，Esc 放開。M0 要在同一台機器上開三個視窗，
-		# 所以一定要留一個放開的方式。
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-		return
-
-	var motion := event as InputEventMouseMotion
-	if motion == null:
-		return
-	var looking := (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-			or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
-	if looking:
-		_turn_camera(-motion.relative.x * MOUSE_SENSITIVITY, motion.relative.y * MOUSE_SENSITIVITY)
-
-
-func _turn_camera(yaw_delta: float, pitch_delta: float) -> void:
-	_camera_yaw += yaw_delta
-	_camera_pitch = clampf(_camera_pitch + pitch_delta, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX)
-
-
-func _process(delta: float) -> void:
-	if not _camera.current:
-		return
-	var stick := GameInput.get_look_delta(device_id)
-	_turn_camera(-stick.x * STICK_LOOK_SPEED * delta, stick.y * STICK_LOOK_SPEED * delta)
-
-	# 指數平滑：不受影格率影響，60 與 144 fps 的追隨速度一致。
-	var target := _focus_target()
-	var horizontal := 1.0 - exp(-delta / CAMERA_FOLLOW_TIME)
-	var vertical := 1.0 - exp(-delta / CAMERA_VERTICAL_TIME)
-	_camera_anchor.x = lerpf(_camera_anchor.x, target.x, horizontal)
-	_camera_anchor.z = lerpf(_camera_anchor.z, target.z, horizontal)
-	_camera_anchor.y = lerpf(_camera_anchor.y, target.y, vertical)
-	_shake_elapsed += delta
-	_kick_elapsed += delta
-	_place_camera()
-
-
 ## 面向的基底。投擲方向讀這個，不是讀 CharacterBody3D 的 transform——
 ## 本體不旋轉（旋轉會把鏡頭一起帶著轉），朝向只存在 Visual 上。
 func facing_basis() -> Basis:
@@ -426,8 +286,19 @@ func facing_yaw() -> float:
 func set_carried_by(holder_slot: int) -> void:
 	carried_by_slot = holder_slot
 	_struggle = 0.0
+	_clear_air_state()
 	if holder_slot >= 0:
 		velocity = Vector3.ZERO
+
+
+## 土狼時間與跳躍緩衝在離開「自己走路」這個狀態時一定要歸零。
+##
+## 被扛、疊高、倒地都會跳過 _process_authority，計時器就會停在最後一次
+## 落地的值——被丟出去的人一落地就會白得一次跳躍，而且看起來像 bug 不像 feature。
+func _clear_air_state() -> void:
+	_coyote = 0.0
+	_jump_buffer = 0.0
+	_step_distance = 0.0
 
 
 func apply_throw(release_velocity: Vector3) -> void:
@@ -460,7 +331,9 @@ func _physics_process(delta: float) -> void:
 	else:
 		_process_remote(delta)
 	_visual.rotation.y = _yaw
+	_apply_lean(delta)
 	_character.drive(0.0 if is_downed else Vector3(velocity.x, 0.0, velocity.z).length())
+	_process_ground_feel(delta)
 	_tick_ragdoll_rumble(delta)
 	_update_look_target()
 	_update_label()
@@ -510,23 +383,35 @@ func _update_look_target() -> void:
 func _process_authority(delta: float) -> void:
 	# 每一幀都問，不能只在著地時問——手把的 just_pressed 是自己做的邊緣偵測，
 	# 漏問幾幀狀態就會過期，導致「握著跳鍵落地後跳不起來」。
-	var jump_pressed := _intent.jump
-	if jump_pressed and is_on_floor() and StackSystem.rider_of(slot_id) >= 0:
+	# 緩衝一定要餵 _intent.jump，**不能**再問一次 GameInput.is_just_pressed——
+	# 手把的邊緣偵測是消耗式的，同一幀問第二次就把狀態吃掉了（見 player_intent.gd）。
+	_coyote = COYOTE_TIME if is_on_floor() else maxf(_coyote - delta, 0.0)
+	_jump_buffer = JUMP_BUFFER if _intent.jump else maxf(_jump_buffer - delta, 0.0)
+	var can_jump := _coyote > 0.0 and _jump_buffer > 0.0
+
+	if can_jump and StackSystem.rider_of(slot_id) >= 0:
 		# 底層跳躍 → 整柱潰散（docs/04）。要在跳之前送，
 		# 否則上層會先跟著飛起來再被拆，看起來像 bug。
 		# 先確認頭上真的有人再送——疊高狀態是廣播同步的，客戶端本來就知道。
 		StackSystem.request_collapse.rpc_id(1, slot_id)
-	if is_on_floor():
+	if can_jump:
+		velocity.y = JUMP_VELOCITY
+		# 兩個都要消耗掉。緩衝不清會在起跳後的第一個空中幀再滿足一次，
+		# 土狼不清則會變成二段跳。
+		_jump_buffer = 0.0
+		_coyote = 0.0
+		_on_jumped()
+	elif is_on_floor():
 		# 著地時一定要歸零。原本只在跳躍時才寫 velocity.y，
 		# 落地後那個很大的負值會一直留著——走下平台的瞬間會像被吸下去。
-		velocity.y = JUMP_VELOCITY if jump_pressed else 0.0
+		velocity.y = 0.0
 	else:
 		velocity.y -= _gravity * (FALL_MULTIPLIER if velocity.y < 0.0 else 1.0) * delta
 
 	# AI 沒有鏡頭，直接給世界方向；真人的輸入相對鏡頭。
 	var wish := Vector3(_intent.move.x, 0.0, _intent.move.y)
 	if not _intent.world_move:
-		wish = _camera_basis() * wish
+		wish = _camera.basis_yaw() * wish
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 
@@ -599,7 +484,7 @@ func _play_swing(clip: StringName, heavy: bool) -> void:
 ## direction 是「我打向哪裡」的世界方向，用來讓鏡頭往那個方向頂一下。
 ## 方向在本機就算得出來（攻擊者與被打者的位置都在手上），不必等 host 回報。
 func on_hit_landed(spec: Dictionary, direction: Vector3 = Vector3.ZERO) -> void:
-	add_shake(float(spec.get("shake", 0.0)), direction)
+	_camera.add_shake(float(spec.get("shake", 0.0)), direction)
 	_character.freeze(float(spec.get("hitstop", 0.0)))
 	_character.punch(CombatSpec.PUNCH_ATTACK)
 	if not is_ai:
@@ -628,7 +513,7 @@ func take_hit(damage: float, impulse: Vector3) -> void:
 	if is_multiplayer_authority():
 		velocity = impulse
 		if not is_ai:
-			add_shake(CombatSpec.HURT_SHAKE, impulse)
+			_camera.add_shake(CombatSpec.HURT_SHAKE, impulse)
 			GameInput.rumble(device_id, &"hurt")
 	if NetworkService.is_host() and damage > 0.0:
 		DownSystem.apply_damage(slot_id, damage, impulse)
@@ -652,26 +537,111 @@ func _update_label() -> void:
 ## 用「上一幀的下墜速度」而不是當幀的：move_and_slide 撞到地面時會把
 ## velocity.y 歸零，當幀讀到的永遠是 0。
 func _process_fall_damage() -> void:
-	var falling := -minf(velocity.y, 0.0)
-	# 落地聲的門檻比傷害低得多——輕輕跳一下也該有聲音，那是「我碰到地了」的回饋。
-	if is_on_floor() and _previous_fall_speed > LAND_SOUND_SPEED:
-		Sfx.play(&"land", global_position, 1.0 - minf(_previous_fall_speed / 30.0, 0.3))
-		# 摔得越重震越大。鏡頭震重寫成「時長固定、強度可調」之後，
-		# 這裡才有意義——舊版 0.16 的震動只會持續 29 毫秒，等於沒有。
-		var weight := clampf(
-			inverse_lerp(LAND_SOUND_SPEED, SAFE_FALL_SPEED, _previous_fall_speed), 0.0, 1.0
-		)
-		if not is_ai:
-			add_shake(CombatSpec.LAND_SHAKE_MAX * weight, Vector3.DOWN)
-			GameInput.rumble(device_id, &"land")
-		_character.punch(lerpf(CombatSpec.PUNCH_LAND_MIN, CombatSpec.PUNCH_LAND_MAX, weight))
-		Vfx.burst(
-			&"land_dust", global_position - Vector3.UP * (character_height * 0.5),
-			Vector3.UP, lerpf(0.6, 1.6, weight)
-		)
 	if is_on_floor() and _previous_fall_speed > SAFE_FALL_SPEED:
 		DownSystem.request_fall_damage.rpc_id(1, slot_id, _previous_fall_speed)
-	_previous_fall_speed = falling
+
+
+## 加速與轉向時身體往內傾。
+##
+## 傾斜的是 Visual 不是 CharacterBody3D——碰撞膠囊要保持直立，
+## 否則走快一點就會卡到門框，那是手感變好卻讓關卡壞掉的典型換法。
+##
+## 用「速度的變化」而不是「現在的速度」：等速直線前進時人是直的，
+## 只有起步、煞車、轉彎才傾。這也讓遠端角色不必額外同步——
+## net_velocity 本來就同步，變化量自己算得出來。
+func _apply_lean(delta: float) -> void:
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	var target := Vector2.ZERO
+	# 倒地時 Visual 的 x 旋轉被 DOWNED_PITCH 佔用，這裡不能去搶。
+	if not is_downed and stacked_on < 0 and carried_by_slot < 0 and delta > 0.0:
+		var accel := (horizontal - _last_horizontal) / delta
+		# 換算到角色自己的座標系：往前加速就往前傾，往右轉就往右倒。
+		var facing := Basis(Vector3.UP, _yaw)
+		var local := facing.inverse() * accel
+		target = Vector2(local.x, -local.z) / (SPEED / ACCEL_TIME) * LEAN_MAX
+		target = target.limit_length(LEAN_MAX)
+	_last_horizontal = horizontal
+	_lean = _lean.lerp(target, 1.0 - exp(-delta / LEAN_TIME))
+	if is_downed:
+		return
+	_visual.rotation.x = _lean.y
+	_visual.rotation.z = -_lean.x
+
+
+## 起跳的表演。只有權威端會走到這裡（跳躍判定在 _process_authority），
+## 但拉長與聲音在每一端都該看得到，所以走 _play_liftoff 廣播。
+func _on_jumped() -> void:
+	_play_liftoff()
+	if multiplayer.has_multiplayer_peer() and not multiplayer.get_peers().is_empty():
+		_play_liftoff.rpc()
+
+
+## 起跳：身體先拉長一下。與命中縮放共用同一個通道，正數是拉長。
+@rpc("any_peer", "call_remote", "unreliable")
+func _play_liftoff() -> void:
+	_character.punch(JUMP_STRETCH)
+	Sfx.play(&"jump", global_position, randf_range(0.95, 1.08), -6.0)
+
+
+## 落地與腳步的表演層。**每一端、每一個角色都跑**，不分權威。
+##
+## 這一段本來寫在 _process_fall_damage() 裡，而那個函式只從 _process_authority
+## 呼叫——所以遠端隊友的落地在你這端是完全無聲無形的。三人遊戲裡三分之二的
+## 落地都不見了，而落地是走路之外最常發生的事。
+##
+## 遠端角色的 velocity 來自 net_velocity（30 Hz 同步），拿來判斷「在不在地上」
+## 已經夠用。不要為了這個再開一條網路欄位——這是表演，差幾十毫秒沒有人看得出來。
+func _process_ground_feel(delta: float) -> void:
+	var grounded := is_on_floor() if is_multiplayer_authority() else absf(velocity.y) < 0.5
+	if grounded and not _was_grounded and _previous_fall_speed > LAND_SOUND_SPEED:
+		_land_feedback()
+	_was_grounded = grounded
+	_previous_fall_speed = -minf(velocity.y, 0.0)
+	_tick_footsteps(delta, grounded)
+
+
+func _land_feedback() -> void:
+	# 摔得越重震越大。鏡頭震重寫成「時長固定、強度可調」之後這裡才有意義——
+	# 舊版 0.16 的震動只會持續 29 毫秒，等於沒有。
+	var weight := clampf(
+		inverse_lerp(LAND_SOUND_SPEED, SAFE_FALL_SPEED, _previous_fall_speed), 0.0, 1.0
+	)
+	Sfx.play(&"land", global_position, 1.0 - minf(_previous_fall_speed / 30.0, 0.3))
+	_character.punch(lerpf(CombatSpec.PUNCH_LAND_MIN, CombatSpec.PUNCH_LAND_MAX, weight))
+	Vfx.burst(
+		&"land_dust", global_position - Vector3.UP * (character_height * 0.5),
+		Vector3.UP, lerpf(0.6, 1.6, weight)
+	)
+	if is_multiplayer_authority() and not is_ai:
+		_camera.add_shake(CombatSpec.LAND_SHAKE_MAX * weight, Vector3.DOWN)
+		GameInput.rumble(device_id, &"land")
+
+
+## 腳步的節奏來源是「走了多遠」，不是動畫時間軸。
+##
+## 動畫時間軸看起來比較「對」，但三隻角色的走路動畫來源不同（程式生成的與
+## 匯入的），落腳的時間點各不相同，要維護一張每隻角色的落腳表——而那張表
+## 會在美術重新匯出模型時靜靜地過期，沒有人會發現。
+##
+## 距離則是所有角色、AI、遠端角色都成立的同一件事，而且節奏會自動跟著速度
+## 變快變慢，不必另外處理。步幅依身高，矮的動物步伐短，聽起來才對。
+func _tick_footsteps(delta: float, grounded: bool) -> void:
+	if not grounded or is_downed or stacked_on >= 0 or carried_by_slot >= 0:
+		_step_distance = 0.0
+		return
+	var speed := Vector3(velocity.x, 0.0, velocity.z).length()
+	if speed < STEP_MIN_SPEED:
+		return
+	_step_distance += speed * delta
+	var stride := character_height * STRIDE_RATIO
+	if _step_distance < stride:
+		return
+	_step_distance -= stride
+	# 音量壓得很低：一秒會響好幾次，用命中音的音量會非常可怕。
+	Sfx.play(&"step", global_position, randf_range(0.88, 1.16), STEP_VOLUME_DB)
+	Vfx.burst(
+		&"step_puff", global_position - Vector3.UP * (character_height * 0.5), Vector3.UP, 0.5
+	)
 
 
 ## 扶起隊友：按住互動鍵靠近倒地的人。累積在自己這端算，
@@ -766,6 +736,7 @@ func on_downed(impulse: Vector3) -> void:
 	velocity = impulse
 	_revive_progress = 0.0
 	_throw_charge = 0.0
+	_clear_air_state()
 	# 真布娃娃優先；建不出來（模型沒有人形骨架）才退回把整個 Visual 壓下去。
 	# 衝量由 DownSystem 廣播，三台機器的起始條件一致（TD-06）。
 	Sfx.play(&"down", global_position)
@@ -853,6 +824,7 @@ func _process_downed(delta: float) -> void:
 func on_stacked(base_slot: int) -> void:
 	stacked_on = base_slot
 	velocity = Vector3.ZERO
+	_clear_air_state()
 	Sfx.play(&"stack", global_position)
 
 

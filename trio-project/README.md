@@ -97,9 +97,21 @@ godot --path . -- --join=127.0.0.1
 `STOP_TIME = 0.07`（到停止）、`TURN_TIME = 0.07`（轉向）。數字越小越接近「按下就走」。
 基準是 Overcooked：回饋速度優先，不要重量感（docs/05）。覺得飄就調小，太滑溜就調大。
 
-**鏡頭**：`CAMERA_DISTANCE_RATIO = 3.1`（距離＝身高的幾倍）、`CAMERA_FOV = 62`、
-`CAMERA_FOLLOW_TIME = 0.09`（水平追隨）、`CAMERA_VERTICAL_TIME = 0.28`（垂直追隨）、
-`MOUSE_SENSITIVITY`。
+**跳躍**：`JUMP_VELOCITY = 5.4`、`FALL_MULTIPLIER = 1.7`（下墜比上升快，跳起來才不飄）、
+`AIR_CONTROL = 0.25`。另外兩個是「按不準也跳得起來」的容錯：
+`COYOTE_TIME = 0.12`（走出平台之後還有多久可以跳）、`JUMP_BUFFER = 0.12`（落地前提早
+按會被記住多久）。物理跑 120 Hz，沒有這兩個的話早按或晚按**一格（8 毫秒）**就整個丟掉。
+
+**腳步與傾斜**：`STRIDE_RATIO = 0.62`（步幅＝身高的幾成，所以矮的角色步伐比較密）、
+`STEP_VOLUME_DB = -15`、`LEAN_MAX = 0.16`（加速與轉彎時身體傾多少）。
+
+**鏡頭**：搬到 `scripts/player/player_camera.gd` 了。`DISTANCE_RATIO = 3.1`
+（距離＝身高的幾倍）、`FIELD_OF_VIEW = 62`、`FOLLOW_TIME = 0.09`（水平追隨）、
+`VERTICAL_TIME = 0.28`（垂直追隨）、`MOUSE_SENSITIVITY`、`STICK_LOOK_SPEED`。
+
+> 搖桿死區改成會重新歸一化了（原本推過 0.2 就直接輸出 0.2，等於沒有慢速），
+> 所以**右搖桿在中間附近會比以前慢**——那是刻意的（微調瞄準用），
+> 但如果整體覺得太鈍，調大 `STICK_LOOK_SPEED`。
 
 **打擊回饋**：在 `scripts/core/combat_spec.gd`，不在這個檔案——那些數字直接對應
 `docs/05-combat.md` 的規格表，放在一起才一眼看得到全部。

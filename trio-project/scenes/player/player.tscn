@@ -1,10 +1,11 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player_character.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/core/carryable.gd" id="2_carryable"]
 [ext_resource type="Script" path="res://scripts/player/character_visual.gd" id="3_visual"]
 [ext_resource type="Script" path="res://scripts/player/attack_controller.gd" id="4_attack"]
 [ext_resource type="Script" path="res://scripts/player/ai_brain.gd" id="5_brain"]
+[ext_resource type="Script" path="res://scripts/player/player_camera.gd" id="6_camera"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -86,3 +87,4 @@ text = "P"
 [node name="Camera3D" type="Camera3D" parent="."]
 current = false
 far = 200.0
+script = ExtResource("6_camera")
