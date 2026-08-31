@@ -64,7 +64,7 @@ func _build() -> void:
 	box.add_child(_objective)
 
 	_leave_button = Button.new()
-	_leave_button.text = "離開房間"
+	_leave_button.text = "Leave room"
 	_leave_button.pressed.connect(_on_leave_pressed)
 	box.add_child(_leave_button)
 
@@ -74,11 +74,11 @@ func _build() -> void:
 
 	var hint := Label.new()
 	hint.text = (
-		"WASD 移動｜空白鍵跳｜Tab 切換滑鼠轉視角\n"
-		+ "F 抓起／放下｜抓著東西時按住攻擊鍵蓄力，放開丟出\n"
-		+ "J 或滑鼠左鍵 攻擊（連按三下接連擊）\n"
-		+ "E 互動／按住扶起倒地的隊友｜走到隊友身上疊高\n"
-		+ "R 卡住時回出生點"
+		"WASD move  |  Space jump  |  Tab toggle mouse look\n"
+		+ "F grab / drop  |  while holding, hold attack to charge, release to throw\n"
+		+ "J or left mouse  attack (tap three times for the combo)\n"
+		+ "E interact / hold to revive a downed teammate  |  walk onto a teammate to stack\n"
+		+ "R respawn if you get stuck"
 	)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(hint)
@@ -128,14 +128,20 @@ func _process(delta: float) -> void:
 ## 那不是他現在該解的問題。一次只講一件事。
 func _current_step() -> String:
 	if not GameFlow.is_in_mission():
-		return "在營地自由練習。準備好就走到北邊的任務看板前面，按 E 出發"
+		return (
+			"Practise anything in camp. When you are ready, walk to the\n"
+			+ "mission board to the north and press E to set out."
+		)
 	for node in get_tree().get_nodes_in_group("breakables"):
 		if not node.is_broken:
-			return "打掉擋路的藤蔓（攻擊不只能打敵人）"
+			return "Break the vines blocking the way (attacks work on scenery too)"
 	for node in get_tree().get_nodes_in_group("log_sockets"):
 		if not node.is_bridged:
-			return "把樹樁上的原木架過斷崖（豬一個人扛得動，蛙＋貓兩個人也行）"
-	return "站上北邊的高台（3.6 公尺，兩層還構不著）"
+			return (
+				"Bridge the ravine with the log on the stump\n"
+				+ "(the pig can carry it alone, or the frog and cat together)"
+			)
+	return "Reach the platform to the north (3.6 m — a two-high stack still falls short)"
 
 
 func _refresh_objective() -> void:
@@ -149,31 +155,31 @@ func _refresh_objective() -> void:
 	if cleared:
 		# 不寫倒數秒數：倒數只在 host 端跑（見 game_flow.gd 的 _process），
 		# 客戶端顯示的數字會是假的。寧可不給數字也不要給錯的。
-		lines.append("馬上回營地……")
+		lines.append("Returning to camp...")
 		# 通關之後給第二個目標，否則星星亮了就沒事做了。
 		# 這一項才是 M0 真正的驗收標準（TD-10）。
 		if _stack_best >= STACK_TARGET:
-			lines.append("★★ 全部達成——通關 ＋ 三層疊高撐過 %.0f 秒" % STACK_TARGET)
+			lines.append("**  All done — cleared, and held a three-high stack for %.0f s" % STACK_TARGET)
 		else:
-			lines.append("★ 已通關。下一個目標：三層疊高走動 %.0f 秒" % STACK_TARGET)
+			lines.append("*  Cleared. Next: walk with a three-high stack for %.0f s" % STACK_TARGET)
 	else:
-		lines.append("目標：%s" % _current_step())
+		lines.append("Objective: %s" % _current_step())
 	# 驗收句子要自帶條件。只寫「撐了 34 秒」沒有意義——TD-10 要的是
 	# 「在 80 ms、1% 丟包之下撐了 34 秒」。截圖存證時這一行就是證明。
 	var condition := NetworkService.simulation_label()
 	lines.append(
-		"疊高計時：現在 %.1f 秒｜最久 %.1f / %.0f 秒　（%s）"
+		"Stack timer: now %.1f s  |  best %.1f / %.0f s   (%s)"
 		% [
 			_stack_now,
 			_stack_best,
 			STACK_TARGET,
-			condition if not condition.is_empty() else "未模擬網路",
+			condition if not condition.is_empty() else "no network simulation",
 		]
 	)
 	if NetworkService.is_host():
 		var addresses := NetworkService.local_addresses()
 		if not addresses.is_empty():
-			lines.append("叫朋友連：%s" % addresses[0])
+			lines.append("Tell your friends to join: %s" % addresses[0])
 	_objective.text = "\n".join(lines)
 
 
@@ -184,26 +190,26 @@ func _refresh() -> void:
 	# 用 if/elif 而不是 match：autoload 上的 enum 成員不是常數運算式，
 	# 當 match 的 pattern 會被剖析器拒絕。
 	if NetworkService.mode == NetworkService.Mode.HOST:
-		_status.text = "HOST（peer %d）" % NetworkService.local_peer_id()
+		_status.text = "HOST (peer %d)" % NetworkService.local_peer_id()
 	elif NetworkService.mode == NetworkService.Mode.CLIENT:
-		_status.text = "CLIENT（peer %d）" % NetworkService.local_peer_id()
+		_status.text = "CLIENT (peer %d)" % NetworkService.local_peer_id()
 	else:
-		_status.text = "離線"
+		_status.text = "Offline"
 		if not NetworkService.last_error.is_empty():
 			_status.text += " — " + NetworkService.last_error
 
 	var lines: Array[String] = []
 	for slot in PlayerRegistry.slots:
-		var mark := " ←你" if slot.peer_id == NetworkService.local_peer_id() else ""
+		var mark := "  <- you" if slot.peer_id == NetworkService.local_peer_id() else ""
 		var state := ""
 		if DownSystem.is_downed(slot.slot_id):
-			state = "（倒地）"
+			state = "  (down)"
 		elif StackSystem.is_stacked(slot.slot_id):
-			state = "（疊在 slot %d 上）" % StackSystem.below_of(slot.slot_id)
-		lines.append("slot %d｜%s%s %.0f 血%s" % [
+			state = "  (stacked on slot %d)" % StackSystem.below_of(slot.slot_id)
+		lines.append("slot %d  %s%s  %.0f HP%s" % [
 			slot.slot_id, slot.display_name, mark,
 			DownSystem.health_of(slot.slot_id), state
 		])
-	_slots.text = "隊伍（%d/%d）\n%s" % [
+	_slots.text = "Team (%d/%d)\n%s" % [
 		PlayerRegistry.slots.size(), PlayerSlot.MAX_SLOTS, "\n".join(lines)
 	]

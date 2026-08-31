@@ -50,3 +50,16 @@ common/physics_ticks_per_second=120
 [rendering]
 
 renderer/rendering_method="forward_plus"
+
+; 這個世界是硬邊的平塗方塊——鋸齒最明顯的形狀，而且沒有貼圖細節可以蓋掉它。
+; MSAA 而不是 FXAA/TAA：平塗表面沒有高頻紋理，FXAA 只會把邊緣糊掉，
+; TAA 則會讓快速移動的角色拖影。MSAA 專門處理幾何邊緣，正好是這裡唯一的問題。
+; 4x 在這種低多邊形場景幾乎不花錢（docs/13 TD-01：「離 GPU 瓶頸很遠」）。
+anti_aliasing/quality/msaa_3d=2
+
+; 程序天空是一大片漸層，8-bit 輸出會有一圈一圈的色帶。
+anti_aliasing/quality/use_debanding=true
+
+; 沒有這一行的話，沒有 WorldEnvironment 的場景會是全黑——
+; 開始畫面的 World 是空的，正好是那種情況。
+environment/defaults/default_environment="res://scenes/world/default_env.tres"

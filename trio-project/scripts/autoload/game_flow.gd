@@ -49,14 +49,16 @@ func is_in_mission() -> bool:
 	return phase == Phase.MISSION
 
 
+## 英文：這個函式現在只給 print() 用，但名字叫 label，遲早有人把它塞進 UI。
+## 到時候不會有人記得回來翻譯。
 func phase_label() -> String:
 	match phase:
 		Phase.CAMP:
-			return "營地"
+			return "Camp"
 		Phase.MISSION:
-			return "任務中"
+			return "Mission"
 		_:
-			return "開始畫面"
+			return "Title"
 
 
 # --- 階段轉換 ---------------------------------------------------------------

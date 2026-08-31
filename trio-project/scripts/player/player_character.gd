@@ -195,8 +195,17 @@ func _ready() -> void:
 		material.albedo_color = SLOT_COLORS[slot_id % SLOT_COLORS.size()]
 	else:
 		material.albedo_color = Color(0.6, 0.6, 0.6)
-	for mesh in _visual.find_children("*", "MeshInstance3D"):
-		mesh.material_override = material
+	# 只上備援膠囊，**不要**用 find_children 掃整個 Visual。
+	#
+	# 現在掃也只會掃到這兩個（模型是執行期 add_child 的，根節點沒有 owner，
+	# find_children 的 owned 預設值 true 會連同整個子樹一起跳過），但那是
+	# 巧合不是設計——哪天模型改成場景裡擺好的，material_override 就會蓋掉
+	# CharacterVisual 逐 surface 設好的材質，貼圖、描邊、命中閃白會同時失效，
+	# 而且不會有任何錯誤訊息。寫死這兩個節點，意圖就跟行為一致了。
+	for path in ["Body", "Nose"]:
+		var mesh := _visual.get_node_or_null(path) as MeshInstance3D
+		if mesh != null:
+			mesh.material_override = material
 
 	# M0 一個 peer 只負責一個 slot，所以這樣就夠。
 	# 本地分屏（TD-04）時要改成每個 slot 一個 SubViewport，不是靠 current。
@@ -547,9 +556,9 @@ func take_hit(damage: float, impulse: Vector3) -> void:
 ## 但「誰倒了、扶到哪了」不回饋的話根本測不動。
 func _update_label() -> void:
 	if is_downed:
-		_label.text = "%s（倒地）" % _base_label
+		_label.text = "%s  (down)" % _base_label
 	elif _revive_progress > 0.0:
-		_label.text = "%s 扶起中 %d%%" % [
+		_label.text = "%s  reviving %d%%" % [
 			_base_label, int(_revive_progress / DownSystem.REVIVE_TIME * 100.0)
 		]
 	else:
@@ -604,6 +613,7 @@ func _on_jumped() -> void:
 @rpc("any_peer", "call_remote", "unreliable")
 func _play_liftoff() -> void:
 	_character.punch(JUMP_STRETCH)
+	_character.play_action(&"jump")
 	Sfx.play(&"jump", global_position, randf_range(0.95, 1.08), -6.0)
 
 
@@ -620,6 +630,10 @@ func _process_ground_feel(delta: float) -> void:
 	if grounded and not _was_grounded and _previous_fall_speed > LAND_SOUND_SPEED:
 		_land_feedback()
 	_was_grounded = grounded
+	# 滯空與扛東西都是**疊加姿勢**，每一端每一個角色都要跑——遠端隊友在你畫面上
+	# 扛著東西時手也該抬起來。兩者都沒有固定長度，所以不能是一次性片段。
+	_character.set_airborne(not grounded and not is_downed)
+	_character.set_carrying(is_carrying())
 	_previous_fall_speed = -minf(velocity.y, 0.0)
 	_tick_footsteps(delta, grounded)
 
@@ -632,6 +646,7 @@ func _land_feedback() -> void:
 	)
 	Sfx.play(&"land", global_position, 1.0 - minf(_previous_fall_speed / 30.0, 0.3))
 	_character.punch(lerpf(CombatSpec.PUNCH_LAND_MIN, CombatSpec.PUNCH_LAND_MAX, weight))
+	_character.play_action(&"land")
 	Vfx.burst(
 		&"land_dust", global_position - Vector3.UP * (character_height * 0.5),
 		Vector3.UP, lerpf(0.6, 1.6, weight)

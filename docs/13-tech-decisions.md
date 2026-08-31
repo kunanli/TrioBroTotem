@@ -170,6 +170,18 @@ RightUpperLeg / RightLowerLeg / RightFoot / RightToes
 | 角色描邊 | **Inverted hull**——第二個 material pass，`cull_front` + 沿法線外推 | 螢幕空間邊緣偵測在分屏雙視口下要跑兩次；inverted hull 是幾何的一部分，對分屏天然免費 |
 | 命中閃白 | **`instance uniform`**，以 `GeometryInstance3D.set_instance_shader_parameter()` 驅動 | 〈[戰鬥與敵人](05-combat.md)〉要求閃白 0.05 秒且頻率極高，複製材質做切換會造成大量 material 切換 |
 
+### 實作狀態
+
+**角色描邊：已完成，照原案做。** `scripts/shaders/outline.gdshader`（`cull_front` + 沿法線外推 + `unshaded`），共用材質由 `scripts/core/outline.gd` 統一提供，掛在角色與泥偶的 `next_pass`。外推量乘上到鏡頭的距離，所以描邊在畫面上遠近一樣粗——這是「半畫面尺寸下仍須可辨識」那條要求的直接解法。誰有描邊：**會動的東西**（角色、敵人）。場景方塊沒有，全部都描會變成線稿。
+
+**命中閃白：改用 `StandardMaterial3D.emission`，沒有照原案的 `instance uniform` 做。**
+
+原案要避免的成本是「複製材質做切換」，但實際實作出來的不是那樣：`character_visual.gd` 的 `_cache_materials()` 在**載入時**把每隻角色的材質複製一份（固定次數，之後不再變動），閃白只是改那份材質上的 `emission` 數值——那是更新 uniform，不是切換材質。這一格想避免的成本，現在的寫法本來就沒有付。
+
+改成 `instance uniform` 反而要付代價：instance uniform 只能宣告在 `ShaderMaterial` 上，所以得把匯入的 `StandardMaterial3D` 整個換成手寫 shader。這三隻模型只有一張 albedo、沒有法線與 ORM 貼圖，技術上做得到，但那等於為了一個目前沒有成本的問題去重寫角色的主材質。
+
+**回頭改的條件**：真的量到 material 切換出現在 profiler 上，或是 M2 要做卡通渲染而必須自己寫角色的主材質時——那時 instance uniform 是順手的，不是額外的。
+
 ---
 
 ## TD-10・M0 驗收標準補上延遲測試

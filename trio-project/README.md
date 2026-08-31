@@ -1,6 +1,8 @@
 # trio-project（Godot 專案）
 
-M0 技術驗證原型。全程膠囊體：**零美術、零動畫、零 shader**（TD-09）。
+M0 技術驗證原型。角色是 Meshy 生成的模型，關卡仍是灰盒方塊。
+動畫**由程式生成**（TD-12，`motion_forge.gd`），shader 只有一支：角色描邊（TD-09 的 inverted hull）。
+**畫面上的字全部是英文**，除錯訊息維持中文。
 
 設計文件在 [`../docs/`](../docs/)，技術決定在 [`../docs/13-tech-decisions.md`](../docs/13-tech-decisions.md)。
 
@@ -25,6 +27,7 @@ scenes/
   world/camp.tscn        營地：出生點、練習道具、營火、任務看板
   world/test_arena.tscn  第一章「藤蔓谷地」灰盒
   world/crate.tscn       可搬物件
+  world/default_env.tres 共用的 Environment（AA／glow／SSAO／霧全在這一份）
 scripts/
   autoload/
     network_service.gd   TD-03：唯一碰 MultiplayerPeer 的地方
@@ -32,6 +35,7 @@ scripts/
     game_input.gd        TD-04：輸入以 device_id 分流
     carry_system.gd      TD-02：抓取、投擲、掙扎的權威判定
   core/
+    outline.gd           TD-09：描邊材質的唯一來源（角色與敵人共用同一份）
     player_slot.gd       TD-04：玩家身分（一個 peer 可以有多個）
     weight_ladder.gd     重量階梯，全遊戲唯一一張表
     carryable.gd         可被抓起的元件（玩家與場景物件共用）
@@ -42,6 +46,7 @@ scripts/
   main.gd                名冊 → 場上角色；換場時抽換 World 子樹
   ui/title_ui.gd         開始畫面（連線控制全在這裡）
   ui/lobby_ui.gd         遊戲中的面板（不是 HUD）
+  shaders/outline.gdshader  全專案唯一一支 shader
 ```
 
 ## 怎麼跑
@@ -155,6 +160,53 @@ godot --path . -- --join=127.0.0.1
 
 物理跑 **120 Hz**（`project.godot`）。角色的移動是在物理幀更新的，
 60 Hz 在高刷新率螢幕上看得出一格一格跳——鏡頭做了平滑之後反而更明顯。
+
+### 畫面與描邊在哪調
+
+這一區的東西**在這台機器上看不到**（headless 的 llvmpipe 不畫蒙皮網格），
+所以下面每一個數字都只驗過「有生效」，沒有驗過「好不好看」。覺得不對就直接調。
+
+**整體畫面**：`scenes/world/default_env.tres` 一份共用的 Environment，
+`camp.tscn` 與 `test_arena.tscn` 都指過去，各自只覆蓋要不一樣的
+（營地暖色黃昏、第一章冷色谷地）。**要調畫面就調這一份**，不要在場景裡各改各的——
+分成兩份的下場是調一個數字要改兩個地方，然後忘記其中一個。
+
+| 想改什麼 | 調哪個 |
+|---|---|
+| 營火與終點標記不夠亮／太亮 | `glow_intensity`（0.55）、`glow_hdr_threshold`（1.1，越低越多東西發光） |
+| 方塊跟地面糊在一起／接縫太髒 | `ssao_intensity`（2.4）、`ssao_radius`（1.4） |
+| 遠處太清楚／太糊 | `fog_depth_begin`（18 公尺）、`fog_depth_end`（90） |
+| 鋸齒 | `project.godot` 的 `msaa_3d`（2 ＝ 4×；0 是關掉、3 是 8×） |
+| 天空有色帶 | `use_debanding`（已開） |
+
+**描邊**：`scripts/core/outline.gd`，三個常數，**平常只要動 `WIDTH`**（0.006）。
+外推量會乘上到鏡頭的距離，所以描邊在畫面上遠近一樣粗，半畫面分屏時也還在。
+`MIN_WIDTH`（0.012）是給耳朵、手指那種薄的部位墊底，破洞才調它；
+`COLOR` 不是純黑（純黑在暗處會跟陰影糊掉）。
+
+轉角破洞是 inverted hull 的已知代價（硬邊的法線不連續，外推會裂開）。
+真的很明顯的話，正解是在美術管線那邊把法線平滑掉，不是把 `WIDTH` 一直加大。
+
+**誰有描邊**：會動的東西（角色、敵人）。場景方塊沒有——全部都描會變成線稿，
+而 `docs/09` 要的是「色塊乾淨」。
+
+### 生成的動畫在哪調
+
+跳躍、落地、受擊、倒下這四支**沒有美術資產**，是程式用骨骼旋轉建出來的（TD-12）。
+
+- **姿勢**：`scripts/player/motion_clips.gd`。`JUMP` / `LAND` / `HURT` / `DEATH`
+  是關鍵影格陣列，每一格寫「在哪個相位（`phase`）的幾成（`at`）、哪根骨頭轉幾度」。
+  角度是**角色空間的尤拉角**，不是骨骼的區域座標——三隻角色的骨架朝向不一樣，
+  寫區域座標的話同一份資料在不同角色身上會歪掉。
+- **長度**：`scripts/player/motion_forge.gd` 的 `NON_COMBAT`，每一支自己寫
+  `windup` / `active` / `recovery`。跳躍的 `windup` 只有 0.05 秒——調長會覺得
+  「按下去沒反應」。
+- **扛東西與滯空**是**疊加姿勢**不是片段（`CARRY_POSE` / `AIRBORNE_POSE`，
+  由 `procedural_pose.gd` 的第五、六層加上去），因為它們必須跟走路共存：
+  上半身抱著、腿照常走。做成片段的話扛著東西就不能走路了。
+
+**骨頭名字打錯是靜默失敗**——那條軌道不會建出來，也不會有任何錯誤訊息，
+只是那根骨頭不動。`tools/check_project.py` 抓不到這個，改完姿勢資料請在遊戲裡看一眼。
 
 ### 角色模型與動畫
 

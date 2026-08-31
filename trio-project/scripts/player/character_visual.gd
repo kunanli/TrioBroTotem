@@ -29,7 +29,8 @@ const CLIP_ALIASES := {
 	&"attack_air": ["attack_air"],
 	&"hurt": ["hurt", "damage", "flinch"],
 	&"death": ["death", "die", "dead"],
-	&"carry": ["carry", "lift", "hold"],
+	&"jump": ["jump", "leap"],
+	&"land": ["land", "landing"],
 }
 
 const LOCOMOTION: Array[StringName] = [&"idle", &"walk", &"run"]
@@ -362,6 +363,7 @@ func _hold_time(ratio: float) -> float:
 ##
 ## 真的需要 alpha 的角色（毛髮卡片、玻璃）在名冊裡寫 "alpha": true。
 func _cache_materials(keep_alpha: bool) -> void:
+	var outline := Outline.material()
 	for node in _model.find_children("*", "MeshInstance3D"):
 		var mesh: MeshInstance3D = node
 		for surface in mesh.get_surface_override_material_count():
@@ -371,6 +373,10 @@ func _cache_materials(keep_alpha: bool) -> void:
 			var copy: StandardMaterial3D = source.duplicate()
 			if not keep_alpha and copy.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
 				copy.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+			# 描邊掛在 next_pass：同一個 surface 畫第二遍，把模型沿法線外推、
+			# 只畫背面（TD-09 的 inverted hull）。掛在這裡是因為這個迴圈本來就
+			# 逐 surface 在設材質，不必再走一次模型。
+			copy.next_pass = outline
 			mesh.set_surface_override_material(surface, copy)
 			_materials.append(copy)
 
@@ -397,6 +403,18 @@ func freeze(seconds: float) -> void:
 ##
 ## 而且本節點的原點在角色腳底（player.tscn 把 position.y 設成 -身高/2），
 ## 壓扁會往地面壓而不是往中心縮——那正好就是 squash & stretch 要的。
+## 扛著東西與離地的疊加姿勢。轉給 ProceduralPose——那一層才是加法的，
+## 而這兩個狀態都必須與走路共存（腿照常走），不能走 play_action。
+func set_carrying(carrying: bool) -> void:
+	if _pose != null:
+		_pose.set_carrying(carrying)
+
+
+func set_airborne(airborne: bool) -> void:
+	if _pose != null:
+		_pose.set_airborne(airborne)
+
+
 func punch(amount: float) -> void:
 	# 布娃娃期間不縮放：PhysicalBoneSimulator3D 在非等比縮放的父節點下，
 	# 碰撞形狀的尺寸會算錯，人會開始漂移。
@@ -460,6 +478,14 @@ func start_ragdoll(impulse: Vector3) -> bool:
 	if _pose != null:
 		_pose.active = false  # 呼吸與看向在倒地時沒有意義，也會跟物理搶
 	if _player != null:
+		# 一定要先收掉進行中的一次性動作，再 stop()。
+		#
+		# stop() **不會**發 animation_finished（只有自然播完才會），所以被倒地
+		# 打斷的那一支永遠等不到 _on_animation_finished，_action 就這樣留著。
+		# 後果不是「少播一次動畫」而是永久的：drive() 開頭就 `_action != &""`
+		# 直接 return，起身之後走路與待機再也不播，人變成滑行的雕像。
+		# 加了跳躍與落地之後，被打斷的機會從「攻擊到一半」變成「隨時」。
+		_end_action()
 		_player.stop()  # 動畫還在寫骨骼的話會跟模擬打架
 	# 命中縮放一定要在模擬開始前收乾淨。非等比縮放的父節點會讓
 	# PhysicalBone3D 的碰撞尺寸算錯，人會漂移。
@@ -590,6 +616,12 @@ func play_action(logical: StringName) -> bool:
 
 func _on_animation_finished(finished: StringName) -> void:
 	if finished == _action:
-		_action = &""
-		if _pose != null:
-			_pose.set_acting(false)
+		_end_action()
+
+
+## 結束一次性動作，把控制權交還給 drive()。
+## 動畫自然播完，或是被倒地之類的外力打斷，都要走這裡。
+func _end_action() -> void:
+	_action = &""
+	if _pose != null:
+		_pose.set_acting(false)

@@ -167,7 +167,8 @@ func _request_register(display_name: String, device_id: int) -> void:
 		if sender == 1:
 			push_warning("[Registry] 隊伍已滿，host 自己也擠不進去")
 		else:
-			_reject.rpc_id(sender, "隊伍已滿（上限 %d 人）" % PlayerSlot.MAX_SLOTS)
+			# 這一句會經由 NetworkService.last_error 顯示在開始畫面上，所以是英文。
+			_reject.rpc_id(sender, "Room is full (max %d players)" % PlayerSlot.MAX_SLOTS)
 
 
 ## host → 全體。call_local 讓 host 自己也走同一條路徑，避免兩套邏輯。

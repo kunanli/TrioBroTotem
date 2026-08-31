@@ -97,7 +97,7 @@ func _wrap_simulation(peer: MultiplayerPeer) -> MultiplayerPeer:
 func simulation_label() -> String:
 	if sim_latency_ms <= 0.0 and sim_loss <= 0.0:
 		return ""
-	return "延遲 %.0f ms、丟包 %.1f%%" % [sim_latency_ms, sim_loss * 100.0]
+	return "%.0f ms latency, %.1f%% loss" % [sim_latency_ms, sim_loss * 100.0]
 
 
 func is_online() -> bool:
@@ -148,7 +148,7 @@ func _create_server_peer(port: int) -> MultiplayerPeer:
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, MAX_CLIENTS)
 	if err != OK:
-		last_error = "無法在 port %d 開伺服器（錯誤碼 %d）" % [port, err]
+		last_error = "Could not host on port %d (error %d)" % [port, err]
 		push_error(last_error)
 		join_failed.emit(last_error)
 		return null
@@ -159,7 +159,7 @@ func _create_client_peer(address: String, port: int) -> MultiplayerPeer:
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
 	if err != OK:
-		last_error = "無法連線至 %s:%d（錯誤碼 %d）" % [address, port, err]
+		last_error = "Could not reach %s:%d (error %d)" % [address, port, err]
 		push_error(last_error)
 		join_failed.emit(last_error)
 		return null
@@ -184,7 +184,7 @@ func _on_connected_to_server() -> void:
 
 
 func _on_connection_failed() -> void:
-	last_error = "連線失敗（對方沒開伺服器，或被防火牆擋住）"
+	last_error = "Connection failed - nobody is hosting there, or a firewall blocked it"
 	push_warning(last_error)
 	multiplayer.multiplayer_peer = null
 	mode = Mode.OFFLINE
@@ -192,7 +192,7 @@ func _on_connection_failed() -> void:
 
 
 func _on_server_disconnected() -> void:
-	last_error = "與伺服器斷線"
+	last_error = "Disconnected from the host"
 	push_warning(last_error)
 	multiplayer.multiplayer_peer = null
 	mode = Mode.OFFLINE

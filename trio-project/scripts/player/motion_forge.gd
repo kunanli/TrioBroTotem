@@ -18,6 +18,34 @@ const LIBRARY_NAME := &"forged"
 const SETTLE_AT := 0.45
 const SETTLE_FACTOR := -0.18
 
+## 不屬於攻擊的生成動畫：自己的時長 ＋ 自己的姿勢資料。
+##
+## `_phase_keys()` 只讀 windup／active／recovery 三個 key，所以這裡直接寫字面值，
+## 不必假裝它是一份 CombatSpec。
+##
+##   hurt   要快——被打到之後越快回到可控狀態越好，拖長會變成硬直
+##   death  慢一倍，倒下要看得出重量
+##   jump   蹲 0.05 蹬 0.08，起跳前的預備動作不能長，長了會覺得按下去沒反應
+##   land   衝擊是瞬間的（active 0），吸收與站直放在 recovery
+const NON_COMBAT := {
+	&"hurt": {
+		"spec": {"windup": 0.04, "active": 0.06, "recovery": 0.16},
+		"frames": MotionClips.HURT,
+	},
+	&"death": {
+		"spec": {"windup": 0.06, "active": 0.34, "recovery": 0.52},
+		"frames": MotionClips.DEATH,
+	},
+	&"jump": {
+		"spec": {"windup": 0.05, "active": 0.08, "recovery": 0.20},
+		"frames": MotionClips.JUMP,
+	},
+	&"land": {
+		"spec": {"windup": 0.01, "active": 0.06, "recovery": 0.22},
+		"frames": MotionClips.LAND,
+	},
+}
+
 
 ## 建出這隻角色的全部生成動畫，掛進 AnimationPlayer。
 ##
@@ -66,10 +94,13 @@ static func _build_all(swing: Dictionary) -> Dictionary:
 	out[&"attack_air"] = _swing_keys(
 		CombatSpec.AIR_ATTACK, swing, MotionClips.AIR_SHAPE
 	)
-	# 受擊與倒下沒有自己的 spec，借連擊第一段的節奏——它是全案最短的，
-	# 受擊本來就該最快回到可控狀態。倒下再放慢一倍。
-	out[&"hurt"] = _phase_keys(CombatSpec.step(0), MotionClips.HURT, 1.0)
-	out[&"death"] = _phase_keys(CombatSpec.step(0), MotionClips.DEATH, 2.6)
+	# 非攻擊的動作各自寫明時長，不再借 CombatSpec.step(0)。
+	#
+	# 借的那個寫法只是「找了一個現成的數字」——受擊、倒下、跳躍的節奏跟
+	# 「第一段輕擊」沒有任何關係，綁在一起的後果是調連擊會連帶改到跳躍。
+	for name in NON_COMBAT:
+		var entry: Dictionary = NON_COMBAT[name]
+		out[name] = _phase_keys(entry["spec"], entry["frames"], 1.0)
 	return out
 
 

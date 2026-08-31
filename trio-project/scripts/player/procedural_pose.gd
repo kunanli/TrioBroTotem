@@ -33,6 +33,12 @@ const LOOK_YAW_FADE := 45.0
 const LOOK_TIME := 0.18
 const POSE_FADE_TIME := 0.2
 
+## 扛東西與滯空這兩個疊加姿勢的淡入淡出時間。
+##
+## 比 POSE_FADE_TIME 快：抓起東西的當下手就該抬起來，慢半拍會覺得延遲。
+## 但也不能是瞬間的，那會變成一格跳過去。
+const STATE_FADE_TIME := 0.12
+
 ## 呼吸與擺動在軀幹上的分配。
 const BREATH_SPINE := 0.6
 const BREATH_CHEST := 0.4
@@ -66,6 +72,10 @@ var _clock := 0.0
 var _motion := 0.0
 var _pose_weight := 1.0
 var _pose_target := 1.0
+var _carry_weight := 0.0
+var _carry_target := 0.0
+var _air_weight := 0.0
+var _air_target := 0.0
 var _look_valid := false
 var _look_point := Vector3.ZERO
 var _look_yaw := 0.0
@@ -103,6 +113,20 @@ func set_acting(acting: bool) -> void:
 	_pose_target = 0.0 if acting else 1.0
 
 
+## 扛著東西：上半身抱起來，腿照常走。
+##
+## 用疊加層而不是生成一支 carry_walk 片段，理由是**腿**：生成的片段會整支蓋掉
+## 走路動畫，那就得連腿的關鍵影格一起做；而這裡從頭到尾不碰腿骨，
+## 走路動畫繼續驅動下半身，上半身直接疊上去。
+func set_carrying(carrying: bool) -> void:
+	_carry_target = 1.0 if carrying else 0.0
+
+
+## 離地：手往外張一點、上身微收。同樣沒有固定長度，所以是疊加層不是片段。
+func set_airborne(airborne: bool) -> void:
+	_air_target = 1.0 if airborne else 0.0
+
+
 func _process_modification() -> void:
 	var skeleton := get_skeleton()
 	if skeleton == null or space == null:
@@ -116,6 +140,9 @@ func _process_modification() -> void:
 	var delta := get_process_delta_time()
 	_clock += delta
 	_pose_weight = lerpf(_pose_weight, _pose_target, 1.0 - exp(-delta / POSE_FADE_TIME))
+	var state_step := 1.0 - exp(-delta / STATE_FADE_TIME)
+	_carry_weight = lerpf(_carry_weight, _carry_target, state_step)
+	_air_weight = lerpf(_air_weight, _air_target, state_step)
 	_advance_look(delta)
 
 	var wanted := _accumulate()
@@ -152,6 +179,14 @@ func _build(skeleton: Skeleton3D) -> void:
 		var bone: StringName = key
 		if not names.has(bone):
 			names.append(bone)
+	# 扛東西與滯空用到的骨頭要明確註冊，不能靠「class_pose 剛好也有」。
+	# _add() 對沒註冊的骨頭是**靜默略過**——某天有人改了某隻角色的職業姿態，
+	# 那隻角色的扛東西姿勢就會無聲無息地不見。
+	for pose in [MotionClips.CARRY_POSE, MotionClips.AIRBORNE_POSE]:
+		for key in pose:
+			var bone: StringName = key
+			if not names.has(bone):
+				names.append(bone)
 
 	var frames := BoneSpace.frames(skeleton, space, names)
 	for bone in names:
@@ -187,7 +222,7 @@ func _advance_look(delta: float) -> void:
 	_look_pitch = lerpf(_look_pitch, goal_pitch, blend)
 
 
-## 把四層疊成「骨骼位置 -> 尤拉角」。位置是 _bones 的索引，不是骨骼 id。
+## 把六層疊成「骨骼位置 -> 尤拉角」。位置是 _bones 的索引，不是骨骼 id。
 func _accumulate() -> Dictionary:
 	var out: Dictionary = {}
 
@@ -214,6 +249,20 @@ func _accumulate() -> Dictionary:
 			var bone: StringName = key
 			var offset: Vector3 = class_pose[bone]
 			_add(out, bone, offset * weight)
+
+	# ⑤ 扛東西 ⑥ 滯空。
+	#
+	# **這兩層不吃第四層那個 (1 - 0.5 * _motion) 的減半。** 那個減半是給待機
+	# 姿態用的（走起來就該淡掉），但扛著東西走路時手不能鬆開，
+	# 減半會變成「走著走著東西就掉手了」。滯空同理，跳躍中本來就在移動。
+	if _carry_weight > 0.01:
+		for key in MotionClips.CARRY_POSE:
+			var bone: StringName = key
+			_add(out, bone, (MotionClips.CARRY_POSE[bone] as Vector3) * _carry_weight)
+	if _air_weight > 0.01:
+		for key in MotionClips.AIRBORNE_POSE:
+			var bone: StringName = key
+			_add(out, bone, (MotionClips.AIRBORNE_POSE[bone] as Vector3) * _air_weight)
 	return out
 
 

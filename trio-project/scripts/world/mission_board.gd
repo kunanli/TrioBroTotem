@@ -53,6 +53,6 @@ func _physics_process(_delta: float) -> void:
 
 func _refresh_prompt(here: int) -> void:
 	if here <= 0:
-		_prompt.text = "任務看板"
+		_prompt.text = "Mission Board"
 		return
-	_prompt.text = "第一章・藤蔓谷地\n按 E／LT 出發"
+	_prompt.text = "Chapter 1 - Vine Hollow\nPress E / LT to set out"

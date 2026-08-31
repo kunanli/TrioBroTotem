@@ -12,10 +12,10 @@ extends CanvasLayer
 ## 網路模擬的檔位。中間兩檔正好涵蓋 TD-10 要求的 80–150 ms、1% 丟包。
 ## 「區網」那一檔不是為了測驗收，是為了讓人先在寬鬆條件下確認操作沒問題。
 const NETWORK_PRESETS := [
-	{"label": "直連（不模擬）", "latency": 0.0, "loss": 0.0},
-	{"label": "區網 20 ms", "latency": 20.0, "loss": 0.0},
-	{"label": "一般 80 ms／1%（驗收）", "latency": 80.0, "loss": 0.01},
-	{"label": "惡劣 150 ms／3%", "latency": 150.0, "loss": 0.03},
+	{"label": "direct (no simulation)", "latency": 0.0, "loss": 0.0},
+	{"label": "LAN 20 ms", "latency": 20.0, "loss": 0.0},
+	{"label": "typical 80 ms / 1% (acceptance)", "latency": 80.0, "loss": 0.01},
+	{"label": "bad 150 ms / 3%", "latency": 150.0, "loss": 0.03},
 ]
 
 var _root: Control
@@ -63,7 +63,7 @@ func _build() -> void:
 	box.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "三人合作冒險　·　M0 技術驗證"
+	subtitle.text = "Three-player co-op adventure  -  M0 tech prototype"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(subtitle)
 
@@ -76,12 +76,12 @@ func _build() -> void:
 	# 「Player-483 疊在我身上」對誰都沒有意義。
 	_name = LineEdit.new()
 	_name.text = PlayerRegistry.local_display_name
-	_name.placeholder_text = "你的名字"
+	_name.placeholder_text = "your name"
 	_name.max_length = 12
 	box.add_child(_name)
 
 	var host_button := Button.new()
-	host_button.text = "開一個房間（當房主）"
+	host_button.text = "Host a room"
 	host_button.pressed.connect(_on_host_pressed)
 	box.add_child(host_button)
 
@@ -90,12 +90,12 @@ func _build() -> void:
 
 	_address = LineEdit.new()
 	_address.text = NetworkService.DEFAULT_ADDRESS
-	_address.placeholder_text = "房主的位址"
+	_address.placeholder_text = "host address"
 	_address.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	join_row.add_child(_address)
 
 	var join_button := Button.new()
-	join_button.text = "加入"
+	join_button.text = "Join"
 	join_button.pressed.connect(_on_join_pressed)
 	join_row.add_child(join_button)
 
@@ -103,15 +103,15 @@ func _build() -> void:
 	# 所以這個選項只出現在開始畫面。
 	_network = OptionButton.new()
 	for preset in NETWORK_PRESETS:
-		_network.add_item("網路：" + String(preset["label"]))
+		_network.add_item("Network: " + String(preset["label"]))
 	_network.item_selected.connect(_on_network_selected)
 	box.add_child(_network)
 
 	var hint := Label.new()
 	hint.text = (
-		"一個人按「開一個房間」，其他人填他的位址按「加入」。\n"
-		+ "湊不到三個人也能玩，空位會由電腦補上。\n"
-		+ "連上之後會一起出現在營地，走到任務看板前出發。"
+		"One player hits Host a room; everyone else types that address and hits Join.\n"
+		+ "Fewer than three players is fine - the empty slots are filled by AI.\n"
+		+ "Once connected you all appear in camp. Walk to the mission board to set out."
 	)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -130,7 +130,7 @@ func _on_phase_changed(phase: int) -> void:
 
 func _refresh_status() -> void:
 	if not NetworkService.last_error.is_empty():
-		_status.text = "連不上：" + NetworkService.last_error
+		_status.text = "Cannot connect: " + NetworkService.last_error
 	else:
 		_status.text = ""
 

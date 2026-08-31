@@ -43,9 +43,11 @@ func _on_phase_changed(phase: int) -> void:
 		_world.remove_child(child)
 		child.queue_free()
 	var path := GameFlow.world_path(phase)
-	if not path.is_empty():
-		var scene: PackedScene = load(path)
-		_world.add_child(scene.instantiate())
+	if path.is_empty():
+		# 開始畫面沒有世界，也就沒有出生點可以搬過去。
+		return
+	var scene: PackedScene = load(path)
+	_world.add_child(scene.instantiate())
 	_place_players()
 
 
@@ -54,6 +56,12 @@ func _on_phase_changed(phase: int) -> void:
 ## 每一端只搬自己有權威的那些——host 去寫客戶端角色的位置沒有用，
 ## 下一個同步封包就會被 net_position 蓋回去。
 func _place_players() -> void:
+	# 沒有 peer 就直接算了。host 中離時 NetworkService 會先把
+	# multiplayer_peer 設成 null 再送 disconnected，於是 GameFlow 切回 Title，
+	# 一路走到這裡——而 is_multiplayer_authority() 在沒有 peer 的情況下
+	# 是硬錯誤（"No multiplayer peer is assigned"），每個角色噴一次。
+	if multiplayer.multiplayer_peer == null:
+		return
 	for child in _players_root.get_children():
 		var player: PlayerCharacter = child
 		if player.is_multiplayer_authority():

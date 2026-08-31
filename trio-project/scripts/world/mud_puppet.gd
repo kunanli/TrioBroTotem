@@ -50,6 +50,9 @@ func _ready() -> void:
 	# 同樣的坑在 player_character.gd 的碰撞形狀與 character_visual.gd 的
 	# 材質快取已經各踩過一次了。
 	_material = _mesh.material_override.duplicate()
+	# 敵人也要描邊：docs/09 要求「半畫面尺寸下仍須可辨識」，而混戰時最需要
+	# 一眼分辨的就是「哪個是敵人」。場景方塊沒有描邊，所以描了邊的就是會動的東西。
+	_material.next_pass = Outline.material()
 	_mesh.material_override = _material
 	_setup_synchronizer()
 	set_multiplayer_authority(1)

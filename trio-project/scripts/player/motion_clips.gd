@@ -63,6 +63,105 @@ const DEATH := [
 ]
 
 
+## 三隻共用：起跳。**第一組會碰到腿骨的姿勢資料。**
+##
+## 之前的片段都只寫上半身，因為攻擊看的是手。但跳躍與落地讀不讀得出來
+## 幾乎完全靠腿——不縮腿的跳躍看起來只是整個人往上平移。
+## 腿骨（LeftUpperLeg／LowerLeg）確實存在，管線的必要骨清單裡就有（TD-07）。
+##
+## 起跳的形狀：蹲一下（windup）→ 蹬直、手往上帶（active）→ 空中把腿縮起來
+## （recovery）。第三格刻意不回中性，因為離開地面之後這個姿勢要接著被
+## ProceduralPose 的滯空層接手。
+const JUMP := [
+	{
+		"phase": &"windup", "at": 0.0,
+		"pose": {
+			&"Spine": Vector3(-10.0, 0.0, 0.0),
+			&"LeftUpperLeg": Vector3(26.0, 0.0, 0.0),
+			&"RightUpperLeg": Vector3(26.0, 0.0, 0.0),
+			&"LeftLowerLeg": Vector3(-40.0, 0.0, 0.0),
+			&"RightLowerLeg": Vector3(-40.0, 0.0, 0.0),
+			&"LeftUpperArm": Vector3(14.0, 0.0, -6.0),
+			&"RightUpperArm": Vector3(14.0, 0.0, 6.0),
+		},
+	},
+	{
+		"phase": &"active", "at": 0.5,
+		"pose": {
+			&"Spine": Vector3(6.0, 0.0, 0.0),
+			&"Chest": Vector3(4.0, 0.0, 0.0),
+			&"LeftUpperLeg": Vector3(-8.0, 0.0, 0.0),
+			&"RightUpperLeg": Vector3(-8.0, 0.0, 0.0),
+			&"LeftLowerLeg": Vector3(-4.0, 0.0, 0.0),
+			&"RightLowerLeg": Vector3(-4.0, 0.0, 0.0),
+			&"LeftUpperArm": Vector3(-52.0, 0.0, -10.0),
+			&"RightUpperArm": Vector3(-52.0, 0.0, 10.0),
+		},
+	},
+	{
+		"phase": &"recovery", "at": 1.0,
+		"pose": {
+			&"Spine": Vector3(-4.0, 0.0, 0.0),
+			&"LeftUpperLeg": Vector3(18.0, 0.0, 0.0),
+			&"RightUpperLeg": Vector3(12.0, 0.0, 0.0),
+			&"LeftLowerLeg": Vector3(-34.0, 0.0, 0.0),
+			&"RightLowerLeg": Vector3(-24.0, 0.0, 0.0),
+			&"LeftUpperArm": Vector3(-24.0, 0.0, -12.0),
+			&"RightUpperArm": Vector3(-24.0, 0.0, 12.0),
+		},
+	},
+]
+
+## 三隻共用：落地。屈膝吸收再站直。
+##
+## 最極端的那一格在 active 的開頭而不是中間——落地的衝擊是瞬間的，
+## 慢慢蹲下去會變成「緩緩坐下」。這與攻擊「出手那一格最極端」是同一條原則。
+const LAND := [
+	{"phase": &"windup", "at": 0.0, "pose": {}},
+	{
+		"phase": &"active", "at": 0.0,
+		"pose": {
+			&"Spine": Vector3(-16.0, 0.0, 0.0),
+			&"Chest": Vector3(-8.0, 0.0, 0.0),
+			&"Head": Vector3(-10.0, 0.0, 0.0),
+			&"LeftUpperLeg": Vector3(34.0, 0.0, 0.0),
+			&"RightUpperLeg": Vector3(34.0, 0.0, 0.0),
+			&"LeftLowerLeg": Vector3(-52.0, 0.0, 0.0),
+			&"RightLowerLeg": Vector3(-52.0, 0.0, 0.0),
+			&"LeftUpperArm": Vector3(20.0, 0.0, -20.0),
+			&"RightUpperArm": Vector3(20.0, 0.0, 20.0),
+		},
+	},
+	{"phase": &"recovery", "at": 1.0, "pose": {}},
+]
+
+## 滯空與扛東西是**疊加姿勢**不是片段（見 procedural_pose.gd）。
+##
+## 兩者都沒有固定長度——你可能掉半秒也可能掉五秒，扛著東西可能走一分鐘。
+## 一次性片段靠 animation_finished 收尾，播不完就永遠鎖住 _action，
+## locomotion 會再也不播。所以這兩個走加法層，讓腿繼續走它的路。
+const AIRBORNE_POSE := {
+	&"Spine": Vector3(-6.0, 0.0, 0.0),
+	&"Chest": Vector3(-4.0, 0.0, 0.0),
+	&"LeftUpperArm": Vector3(-18.0, 0.0, -16.0),
+	&"RightUpperArm": Vector3(-18.0, 0.0, 16.0),
+	&"LeftLowerArm": Vector3(-14.0, 0.0, 0.0),
+	&"RightLowerArm": Vector3(-14.0, 0.0, 0.0),
+}
+
+## 扛東西：雙手抬到身前，上身微微後仰抗衡重量。
+## 只有上半身——腿要照常走路，這正是走加法層而不是片段的理由。
+const CARRY_POSE := {
+	&"Spine": Vector3(8.0, 0.0, 0.0),
+	&"Chest": Vector3(5.0, 0.0, 0.0),
+	&"Head": Vector3(-4.0, 0.0, 0.0),
+	&"LeftUpperArm": Vector3(-62.0, 0.0, 14.0),
+	&"RightUpperArm": Vector3(-62.0, 0.0, -14.0),
+	&"LeftLowerArm": Vector3(-46.0, 0.0, 0.0),
+	&"RightLowerArm": Vector3(-46.0, 0.0, 0.0),
+}
+
+
 ## 豬戰士：過頂重砸。蓄力時整個上身向後拉開、雙手舉高，出手時壓下去。
 ## 幅度是三隻裡最大的——戰士的辨識度就在「慢半拍但很重」。
 const PIG_SWING := {

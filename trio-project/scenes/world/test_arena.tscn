@@ -1,4 +1,4 @@
-[gd_scene load_steps=30 format=3]
+[gd_scene load_steps=28 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/crate.tscn" id="1_crate"]
 [ext_resource type="PackedScene" path="res://scenes/world/mud_puppet.tscn" id="2_puppet"]
@@ -6,17 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/log.tscn" id="4_log"]
 [ext_resource type="PackedScene" path="res://scenes/world/vine_wall.tscn" id="5_vine"]
 [ext_resource type="Script" path="res://scripts/world/log_socket.gd" id="6_socket"]
-
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
-
-[sub_resource type="Sky" id="Sky_sky"]
-sky_material = SubResource("ProceduralSkyMaterial_sky")
-
-[sub_resource type="Environment" id="Environment_env"]
-background_mode = 2
-sky = SubResource("Sky_sky")
-ambient_light_source = 3
-tonemap_mode = 2
+[ext_resource type="Environment" path="res://scenes/world/default_env.tres" id="7_env"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_start"]
 size = Vector3(14, 1, 28)
@@ -85,11 +75,18 @@ size = Vector3(3, 2.5, 8)
 [node name="TestArena" type="Node3D"]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
-environment = SubResource("Environment_env")
+environment = ExtResource("7_env")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866, 0, 0.5, 0.383, 0.6428, -0.6633, -0.3214, 0.766, 0.5567, 0, 14, 0)
+light_color = Color(0.86, 0.92, 1, 1)
+light_energy = 1.15
+light_angular_distance = 1.0
 shadow_enabled = true
+shadow_bias = 0.03
+shadow_normal_bias = 1.5
+shadow_blur = 1.0
+directional_shadow_max_distance = 90.0
 
 [node name="SpawnPoints" type="Node3D" parent="."]
 
