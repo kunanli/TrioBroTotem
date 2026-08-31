@@ -8,7 +8,9 @@ extends Node3D
 
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 
-## M0 的三個出生點，之後由關卡資料提供。
+## 關卡沒有提供出生點時的退路。正常情況下由關卡的 SpawnPoints 決定——
+## 第一章是線性的，出生點放錯邊會直接跳過第一個關卡（藤蔓牆），
+## 而且沒有任何錯誤訊息，只會覺得「這關怎麼沒作用」。
 const SPAWN_POINTS: Array[Vector3] = [
 	Vector3(-2.5, 1.2, 0.0),
 	Vector3(0.0, 1.2, 0.0),
@@ -111,8 +113,19 @@ func _spawn_player(data: Variant) -> Node:
 	player.is_ai = slot.is_ai
 	player.display_name = slot.display_name
 
-	var spawn_position: Vector3 = SPAWN_POINTS[slot.slot_id % SPAWN_POINTS.size()]
+	var spawn_position := _spawn_point(slot.slot_id)
 	player.position = spawn_position
 	player.net_position = spawn_position
 	player.spawn_position = spawn_position
 	return player
+
+
+## 關卡自己說要從哪裡開始。場景在每一端都一樣，所以這仍然是資料的純函式
+## （見 _spawn_player 的註解）。
+func _spawn_point(slot_id: int) -> Vector3:
+	var markers := get_tree().get_nodes_in_group("spawn_points")
+	if not markers.is_empty():
+		markers.sort_custom(func(a: Node, b: Node) -> bool: return a.name < b.name)
+		var marker: Node3D = markers[slot_id % markers.size()]
+		return marker.global_position
+	return SPAWN_POINTS[slot_id % SPAWN_POINTS.size()]

@@ -187,6 +187,20 @@ func _process(delta: float) -> void:
 	_refresh_objective()
 
 
+## 目標跟著關卡的段落走（docs/07 第一章）。
+##
+## 只寫最終目標的話，玩家在藤蔓前面卡住時看到的是「站上北邊的高台」——
+## 那不是他現在該解的問題。一次只講一件事。
+func _current_step() -> String:
+	for node in get_tree().get_nodes_in_group("breakables"):
+		if not node.is_broken:
+			return "打掉擋路的藤蔓（攻擊不只能打敵人）"
+	for node in get_tree().get_nodes_in_group("log_sockets"):
+		if not node.is_bridged:
+			return "把樹樁上的原木架過斷崖（豬一個人扛得動，蛙＋貓兩個人也行）"
+	return "站上北邊的高台（3.6 公尺，兩層還構不著）"
+
+
 func _refresh_objective() -> void:
 	if _objective == null:
 		return
@@ -203,7 +217,7 @@ func _refresh_objective() -> void:
 		else:
 			lines.append("★ 已通關。下一個目標：三層疊高走動 %.0f 秒" % STACK_TARGET)
 	else:
-		lines.append("目標：想辦法站上北邊的高台（3.6 公尺，跳不上去）")
+		lines.append("目標：%s" % _current_step())
 	# 驗收句子要自帶條件。只寫「撐了 34 秒」沒有意義——TD-10 要的是
 	# 「在 80 ms、1% 丟包之下撐了 34 秒」。截圖存證時這一行就是證明。
 	var condition := NetworkService.simulation_label()

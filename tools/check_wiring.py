@@ -297,7 +297,12 @@ def run(root):
         used |= set(re.findall(r'get_nodes_in_group\("([^"]+)"\)', text))
         used |= set(re.findall(r'is_in_group\("([^"]+)"\)', text))
     for scene_text in (p.read_text(encoding="utf-8") for p in scenes):
-        added |= set(re.findall(r'groups = \[([^\]]*)\]', scene_text))
+        # 兩種寫法都要認：節點屬性的 `groups = ["a", "b"]`，
+        # 以及節點標頭上的 `groups=["a"]`（Godot 自己存檔就是不帶空白的那種）。
+        # 而且要抓出**每一個**名字，不是整串當一個——原本整串進 added，
+        # 場景裡宣告的群組永遠對不上腳本讀的名字，變成假警報。
+        for listing in re.findall(r'groups\s*=\s*\[([^\]]*)\]', scene_text):
+            added |= set(re.findall(r'"([^"]+)"', listing))
     for group in sorted(used - added):
         problems.append(f'沒有任何地方 add_to_group("{group}")，但有人在讀這個群組')
     notes.append(f"群組：{len(added)} 個加入、{len(used)} 個讀取")
