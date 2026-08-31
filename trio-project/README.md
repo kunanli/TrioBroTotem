@@ -1,6 +1,6 @@
 # trio-project（Godot 專案）
 
-M0 技術驗證原型。角色是 Meshy 生成的模型，關卡仍是灰盒方塊。
+M0 技術驗證原型。角色是 Meshy 生成的模型；關卡的幾何全部是 Godot 的原始形狀組出來的（沒有任何場景模型檔），但**視覺層次做過了**：配色、燈光、路、谷壁、營地。
 動畫**由程式生成**（TD-12，`motion_forge.gd`），shader 只有一支：角色描邊（TD-09 的 inverted hull）。
 **畫面上的字全部是英文**，除錯訊息維持中文。
 
@@ -28,6 +28,11 @@ scenes/
   world/test_arena.tscn  第一章「藤蔓谷地」灰盒
   world/crate.tscn       可搬物件
   world/default_env.tres 共用的 Environment（AA／glow／SSAO／霧全在這一份）
+  world/materials/*.tres  共用材質，由 tools/sync_materials.py 從 palette.gd 產生
+  world/rock.tscn        可扛的石頭（以前是一個放大的木箱）
+  world/tent.tscn        帳篷（**有碰撞**，以前那兩個是穿得過去的方塊）
+  world/totem.tscn       圖騰：三隻不同族疊在一起（docs/02 的核心意象）
+  tools/level_probe.tscn 截圖探針，不進 exe（export_presets 的 exclude_filter）
 scripts/
   autoload/
     network_service.gd   TD-03：唯一碰 MultiplayerPeer 的地方
@@ -36,6 +41,7 @@ scripts/
     carry_system.gd      TD-02：抓取、投擲、掙扎的權威判定
   core/
     outline.gd           TD-09：描邊材質的唯一來源（角色與敵人共用同一份）
+    palette.gd           全遊戲配色的唯一來源（封閉在 25 色）
     player_slot.gd       TD-04：玩家身分（一個 peer 可以有多個）
     weight_ladder.gd     重量階梯，全遊戲唯一一張表
     carryable.gd         可被抓起的元件（玩家與場景物件共用）
@@ -46,6 +52,9 @@ scripts/
   main.gd                名冊 → 場上角色；換場時抽換 World 子樹
   ui/title_ui.gd         開始畫面（連線控制全在這裡）
   ui/lobby_ui.gd         遊戲中的面板（不是 HUD）
+  world/scenery_plan.gd  關卡裝飾的資料表（路徑折線、谷壁參數、營地擺設）
+  world/scenery.gd       依上表把裝飾長出來（路、邊石、谷壁、柵欄、火塘、雜物）
+  world/campfire.gd      營火的閃爍與火焰／煙
   shaders/outline.gdshader  全專案唯一一支 shader
 ```
 
@@ -160,6 +169,78 @@ godot --path . -- --join=127.0.0.1
 
 物理跑 **120 Hz**（`project.godot`）。角色的移動是在物理幀更新的，
 60 Hz 在高刷新率螢幕上看得出一格一格跳——鏡頭做了平滑之後反而更明顯。
+
+### 我看得到畫面了：tools/shoot_level.py
+
+```bash
+GODOT=/path/to/godot python3 tools/shoot_level.py          # 兩關都拍
+GODOT=/path/to/godot python3 tools/shoot_level.py camp     # 只拍營地
+```
+
+這台開發機沒有顯示卡，但 **Xvfb ＋ Mesa 的 lavapipe（軟體 Vulkan）讓 Godot 的
+Forward+ 跑得起來**，跟遊戲實際用的渲染器一模一樣，連 SSAO 都畫得出來。
+Linux 上要 `apt install xvfb mesa-vulkan-drivers`。
+
+鏡頭用的是**玩家真正的參數**（從 `player_camera.gd` 推出來：距離 3.1 倍身高、
+俯角 0.42、FOV 62），不是隨便挑一個好看的角度——宣傳照會騙人。出生點會放三根
+人形膠囊當比例尺：**畫面裡沒有人的尺度，就沒辦法判斷一顆石頭是大是小**，
+然後每樣東西都會被做得太大。
+
+> **踩過的坑**：一開始走的是 Compatibility（OpenGL）渲染器，那條路**平行光完全
+> 不會亮**——整個世界只剩環境光與霧，而且沒有任何警告。差點照著那個畫面把太陽
+> 調成另一個角度，實際上根本沒有太陽。畫面整個變平、方塊沒有亮暗面，
+> 那是渲染器的問題，不是你的燈。
+
+### 配色在哪調
+
+`scripts/core/palette.gd`，25 色封閉表，**要加一個就要刪一個**。兩條規則寫在
+檔案開頭，改顏色之前先讀那兩段。
+
+`.tscn` 沒辦法呼叫程式，所以場景裡指的是 `scenes/world/materials/*.tres`——
+那些是 `tools/sync_materials.py` 從配色表**產生**的，不要手改。改完配色跑一次：
+
+```bash
+python3 tools/sync_materials.py     # 重新產生
+python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
+```
+
+| 想改什麼 | 調哪個 |
+|---|---|
+| 路不夠明顯 | `path` 與 `turf` 的明度差（現在 0.156，規則是至少 0.15） |
+| 敵人不夠顯眼 | `corrupt`（紫）與 `corrupt_glow`（常駐自發光） |
+| 「這個爬得上去」看不出來 | `stone`——樹樁台、終點台、練習台階都用它 |
+| 谷壁太暗／太亮 | `cliff_face`。**垂直面天生就比水平面暗**，所以這個數字看起來會高得不合理，那是對的（檔案裡有一整段在講） |
+
+### 路與裝飾在哪調
+
+資料在 `scripts/world/scenery_plan.gd`（**只有資料**），產生器在 `scenery.gd`。
+改資料、跑 `shoot_level.py`、看結果——這是這一輪的迭代迴圈。
+
+| 想改什麼 | 調哪個 |
+|---|---|
+| 路的走法、寬窄、岔路 | `PATHS`。每一段是 `{"p": 位置, "w": 半寬}`，中間會平滑成曲線 |
+| 路邊的石頭 | `scenery.gd` 的 `KERB_*`。**真正讓人認出「路」的是兩排石頭**，不是那條變色的帶子 |
+| 谷壁的高低、往內傾多少 | `CLIFFS` 的 `height` 與 `lean_deg`。**往內傾是「這是谷」最強的暗示**，垂直的牆讀作走廊 |
+| 斷崖的深度與霧氣 | `RAVINE` |
+| 營地的柵欄、大門、火塘、雜物 | `PALISADE` / `FIRE_RING` / `CLUTTER` |
+
+**三條不能破的規則**（都寫成程式裡的檢查或註解了）：
+
+1. **有碰撞、或有程式用名字／路徑／群組指到它 → 寫在 `.tscn`；其餘才用程式生。**
+2. **走廊中央（|x| < 6）從 0.35 公尺到岩拱下緣之間不准有任何裝飾。** 裝飾沒有碰撞，
+   玩家會直接穿過去。這一條是 `scenery.gd::_check_clearance()`，違規會累積在
+   `clearance_violations` 裡。
+3. **亂數一律用帶固定種子的 `RandomNumberGenerator` 實例，不准用全域 `randf()`。**
+   全域那個用時間當種子，三台機器會長出三片不一樣的谷壁，而 docs/PLAYTEST.md
+   明確要測試者互相看對方的螢幕。
+
+**同一種東西超過 8 份就用 `MultiMeshInstance3D`**，而且**一定要明寫
+`custom_aabb`**——實例散佈在 56 公尺、節點卻在原點，引擎算出來的邊界是錯的，
+整片谷壁會隨著轉鏡頭忽隱忽現，看起來會像驅動程式的 bug。
+
+> **寫測試的人注意**：Godot 4.7 的 `MultiMesh.get_instance_transform()`
+> **讀回來一律是單位矩陣**（寫進去是對的、畫出來也是對的，只有讀回來不對）。
+> 拿它驗位置會得到「每一批都違規」這種假警報。要驗就在資料還在手上的時候驗。
 
 ### 畫面與描邊在哪調
 

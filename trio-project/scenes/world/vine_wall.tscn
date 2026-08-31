@@ -4,10 +4,10 @@
 [ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/vine_break.tres" id="m_vine_break"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_vine"]
-size = Vector3(4, 4, 0.6)
+size = Vector3(4, 8, 0.6)
 
 [sub_resource type="BoxMesh" id="BoxMesh_vine"]
-size = Vector3(4, 4, 0.6)
+size = Vector3(4, 8, 0.6)
 
 [node name="VineWall" type="StaticBody3D"]
 collision_layer = 9

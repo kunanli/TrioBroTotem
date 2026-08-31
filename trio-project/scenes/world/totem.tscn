@@ -1,0 +1,48 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/totem.tres" id="m_totem"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/stone.tres" id="m_stone"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_totem"]
+height = 3.6
+radius = 0.62
+
+[sub_resource type="BoxMesh" id="BoxMesh_base"]
+size = Vector3(1.5, 0.34, 1.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pig"]
+size = Vector3(1.26, 1.16, 1.26)
+
+[sub_resource type="BoxMesh" id="BoxMesh_frog"]
+size = Vector3(1.04, 1.04, 1.04)
+
+[sub_resource type="BoxMesh" id="BoxMesh_cat"]
+size = Vector3(0.82, 1.24, 0.82)
+
+[node name="Totem" type="StaticBody3D"]
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
+shape = SubResource("CylinderShape3D_totem")
+
+[node name="Base" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.17, 0)
+mesh = SubResource("BoxMesh_base")
+material_override = ExtResource("m_stone")
+
+[node name="Pig" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.99619, 0, -0.08716, 0, 1, 0, 0.08716, 0, 0.99619, 0, 0.92, 0)
+mesh = SubResource("BoxMesh_pig")
+material_override = ExtResource("m_totem")
+
+[node name="Frog" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.98769, 0, 0.15643, 0, 1, 0, -0.15643, 0, 0.98769, 0, 2.02, 0)
+mesh = SubResource("BoxMesh_frog")
+material_override = ExtResource("m_totem")
+
+[node name="Cat" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.99619, 0, -0.08716, 0, 1, 0, 0.08716, 0, 0.99619, 0, 3.16, 0)
+mesh = SubResource("BoxMesh_cat")
+material_override = ExtResource("m_totem")

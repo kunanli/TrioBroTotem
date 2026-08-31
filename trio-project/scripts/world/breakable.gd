@@ -25,9 +25,17 @@ var is_broken: bool = false
 
 var _applied := false
 
+## 每一片網格原本的底部高度（本節點座標系）。壓扁之後要讓底部留在原地。
+var _mesh_floor: Dictionary = {}
+
 
 func _ready() -> void:
 	add_to_group("breakables")
+	for child in get_children():
+		var mesh := child as MeshInstance3D
+		if mesh != null:
+			# 壓扁前先記下底部在哪（本節點的座標系）。
+			_mesh_floor[mesh.get_instance_id()] = mesh.position.y + mesh.get_aabb().position.y
 	health = max_health
 	_setup_synchronizer()
 	set_multiplayer_authority(1)
@@ -77,5 +85,12 @@ func _collapse() -> void:
 	for child in get_children():
 		var mesh := child as MeshInstance3D
 		if mesh != null:
+			# 壓扁之後把底部放回原來的位置。
+			#
+			# 舊版是 `position.y -= 0.5` 這個硬寫的數字：4 公尺高的網格壓成 0.18
+			# 只剩 0.72 高，位置卻只降 0.5，殘骸就卡在半空（實測浮在 1.14 公尺）。
+			# 牆改成 8 公尺之後那個數字錯得更多。改成從網格自己的外框算。
+			var box := mesh.get_aabb()
+			var bottom: float = _mesh_floor.get(mesh.get_instance_id(), 0.0)
 			mesh.scale = Vector3(1.0, RUBBLE_SCALE, 1.0)
-			mesh.position.y -= 0.5
+			mesh.position.y = bottom - box.position.y * RUBBLE_SCALE

@@ -42,14 +42,14 @@ const SHOTS := {
 		# 回頭往 +z 看：全場最長的視線，也是路面共面 z-fighting 最容易現形的一張。
 		{"name": "08_lookback", "x": 0.0, "z": -14.0, "yaw": PI},
 		# 唯一一張不是玩家視角的：整條走廊的版型，用來看路的走向對不對。
-		{"name": "09_overview", "eye": Vector3(16.0, 26.0, 30.0), "at": Vector3(0.0, 0.0, -4.0)},
+		{"name": "09_overview", "eye": Vector3(34.0, 52.0, 44.0), "at": Vector3(0.0, 0.0, -6.0)},
 	],
 	"res://scenes/world/camp.tscn": [
 		{"name": "01_spawn", "x": 0.0, "z": 6.0, "yaw": 0.0},
 		{"name": "02_fire", "x": 0.0, "z": 3.0, "yaw": 0.0},
 		{"name": "03_board", "x": 0.0, "z": -6.0, "yaw": 0.0},
 		{"name": "04_gate", "x": 0.0, "z": -13.0, "yaw": 0.0},
-		{"name": "05_overview", "eye": Vector3(20.0, 22.0, 22.0), "at": Vector3(0.0, 0.0, -2.0)},
+		{"name": "05_overview", "eye": Vector3(24.0, 26.0, 26.0), "at": Vector3(0.0, 0.0, -2.0)},
 	],
 }
 

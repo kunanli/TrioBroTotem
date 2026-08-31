@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/wood_light.tres" id="m_canvas"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/cliff_deep.tres" id="m_dark"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tent"]
+size = Vector3(2.6, 2, 3.4)
+
+[sub_resource type="PrismMesh" id="PrismMesh_tent"]
+size = Vector3(3, 2.2, 3.6)
+
+[node name="Tent" type="StaticBody3D"]
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+shape = SubResource("BoxShape3D_tent")
+
+[node name="Canvas" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+mesh = SubResource("PrismMesh_tent")
+material_override = ExtResource("m_canvas")
+
+[node name="Door" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.62, 0, 0, 0, 0.66, 0, 0, 0, 0.2, 0, 0.73, 1.72)
+mesh = SubResource("PrismMesh_tent")
+material_override = ExtResource("m_dark")

@@ -25,7 +25,7 @@ OUT_DIR = ROOT / "trio-project/scenes/world/materials"
 # 那條路徑在 palette.gd 裡會退回 build()，不需要檔案。
 WANTED = [
     "turf", "cliff_face", "stone", "wood", "wood_light",
-    "crate", "vine_break", "corrupt", "ember", "goal", "rock", "totem",
+    "crate", "vine_break", "corrupt", "ember", "goal", "rock", "totem", "cliff_deep",
 ]
 
 

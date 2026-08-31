@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3]
+[gd_scene load_steps=26 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/crate.tscn" id="1_crate"]
 [ext_resource type="PackedScene" path="res://scenes/world/log.tscn" id="2_log"]
@@ -11,6 +11,9 @@
 [ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/stone.tres" id="m_stone"]
 [ext_resource type="PackedScene" path="res://scenes/world/rock.tscn" id="9_rock"]
 [ext_resource type="Script" path="res://scripts/world/scenery.gd" id="s_scenery"]
+[ext_resource type="PackedScene" path="res://scenes/world/tent.tscn" id="s_tent"]
+[ext_resource type="PackedScene" path="res://scenes/world/totem.tscn" id="s_totem"]
+[ext_resource type="Script" path="res://scripts/world/campfire.gd" id="s_fire"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(34, 1, 34)
@@ -107,6 +110,7 @@ shape = SubResource("BoxShape3D_fence")
 [node name="Mesh" type="MeshInstance3D" parent="FenceNorth"]
 mesh = SubResource("BoxMesh_fence")
 material_override = ExtResource("m_wood")
+visible = false
 
 [node name="FenceSouth" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 17)
@@ -119,6 +123,7 @@ shape = SubResource("BoxShape3D_fence")
 [node name="Mesh" type="MeshInstance3D" parent="FenceSouth"]
 mesh = SubResource("BoxMesh_fence")
 material_override = ExtResource("m_wood")
+visible = false
 
 [node name="FenceEast" type="StaticBody3D" parent="."]
 transform = Transform3D(-4.371e-08, 0, 1, 0, 1, 0, -1, 0, -4.371e-08, 17, 1.5, 0)
@@ -131,6 +136,7 @@ shape = SubResource("BoxShape3D_fence")
 [node name="Mesh" type="MeshInstance3D" parent="FenceEast"]
 mesh = SubResource("BoxMesh_fence")
 material_override = ExtResource("m_wood")
+visible = false
 
 [node name="FenceWest" type="StaticBody3D" parent="."]
 transform = Transform3D(-4.371e-08, 0, 1, 0, 1, 0, -1, 0, -4.371e-08, -17, 1.5, 0)
@@ -143,27 +149,26 @@ shape = SubResource("BoxShape3D_fence")
 [node name="Mesh" type="MeshInstance3D" parent="FenceWest"]
 mesh = SubResource("BoxMesh_fence")
 material_override = ExtResource("m_wood")
-
-[node name="Campfire" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0)
-mesh = SubResource("CylinderMesh_fire")
-material_override = ExtResource("m_ember")
+visible = false
 
 [node name="FireLight" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
 light_color = Color(1, 0.72, 0.42, 1)
 light_energy = 2.4
-omni_range = 12.0
+omni_range = 9.0
+script = ExtResource("s_fire")
 
-[node name="TentA" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1, -4)
-mesh = SubResource("BoxMesh_tent")
-material_override = ExtResource("m_wood_light")
+[node name="TentA" parent="." instance=ExtResource("s_tent")]
+transform = Transform3D(-0.34202, 0, 0.93969, 0, 1, 0, -0.93969, 0, -0.34202, 7.048, 0, 2.565)
 
-[node name="TentB" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.5, 1, -3)
-mesh = SubResource("BoxMesh_tent")
-material_override = ExtResource("m_wood_light")
+[node name="TentB" parent="." instance=ExtResource("s_tent")]
+transform = Transform3D(-0.64279, 0, -0.76604, 0, 1, 0, 0.76604, 0, -0.64279, -5.745, 0, 4.821)
+
+[node name="TentC" parent="." instance=ExtResource("s_tent")]
+transform = Transform3D(0.76604, 0, -0.64279, 0, 1, 0, 0.64279, 0, 0.76604, -4.821, 0, -5.745)
+
+[node name="Totem" parent="." instance=ExtResource("s_totem")]
+transform = Transform3D(0.93969, 0, -0.34202, 0, 1, 0, 0.34202, 0, 0.93969, 3.4, 0, -3.6)
 
 [node name="BoardPost" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, -10)
@@ -176,6 +181,16 @@ shape = SubResource("BoxShape3D_board")
 [node name="Mesh" type="MeshInstance3D" parent="BoardPost"]
 mesh = SubResource("BoxMesh_board")
 material_override = ExtResource("m_wood_light")
+
+[node name="LegWest" type="MeshInstance3D" parent="BoardPost"]
+transform = Transform3D(0.22, 0, 0, 0, 1.7, 0, 0, 0, 0.22, -1.35, -0.75, 0)
+mesh = SubResource("BoxMesh_board")
+material_override = ExtResource("m_wood")
+
+[node name="LegEast" type="MeshInstance3D" parent="BoardPost"]
+transform = Transform3D(0.22, 0, 0, 0, 1.7, 0, 0, 0, 0.22, 1.35, -0.75, 0)
+mesh = SubResource("BoxMesh_board")
+material_override = ExtResource("m_wood")
 
 [node name="MissionBoard" type="Area3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -8.5)

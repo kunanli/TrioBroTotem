@@ -30,6 +30,10 @@ const TURN_TIME := 0.07    ## 轉向到位
 const COYOTE_TIME := 0.12
 const JUMP_BUFFER := 0.12
 
+## 掉到這個高度以下就自動重生。斷崖底在 −12，留一段餘裕讓玩家看完那一段墜落
+## （掉下去是自己的錯，但要看得到自己掉下去，不然只會覺得遊戲當掉了）。
+const VOID_Y := -22.0
+
 ## 空中還保有多少控制力。0 = 完全不能轉向，1 = 與地面相同。
 ## 太高的話被丟出去的人可以自己飛回來，投擲就沒意義了。
 const AIR_CONTROL := 0.25
@@ -414,6 +418,16 @@ func _update_look_target() -> void:
 
 
 func _process_authority(delta: float) -> void:
+	# 掉出世界就自動重生。
+	#
+	# 以前沒有任何高度下限，掉進斷崖會**一直掉**，只能自己按 R。沒人抱怨是因為
+	# 關卡太平、大家根本不會往下看；斷崖現在讀得出來是斷崖了，就會有人掉下去。
+	# 這等同於自動幫你按一次 R，不是新機制。
+	if global_position.y < VOID_Y:
+		DownSystem.request_respawn.rpc_id(1, slot_id)
+		return
+
+
 	# 每一幀都問，不能只在著地時問——手把的 just_pressed 是自己做的邊緣偵測，
 	# 漏問幾幀狀態就會過期，導致「握著跳鍵落地後跳不起來」。
 	# 緩衝一定要餵 _intent.jump，**不能**再問一次 GameInput.is_just_pressed——
