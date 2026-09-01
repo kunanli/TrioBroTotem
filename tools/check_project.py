@@ -186,6 +186,7 @@ DIMENSIONS = [
     ("scenes/world/test_arena.tscn", "BoxShape3D_shelf", (5, 2.4, 3.6), "遠岸的台（2.4：沿用樹樁的高度，不發明第八個尺寸）"),
     ("scenes/world/test_arena.tscn", "BoxShape3D_pillar", (4, 3.6, 4), "凹室的柱子（3.6：沿用終點台的高度）"),
     ("scenes/world/gate.tscn", "BoxShape3D_gate", (15, 8, 0.6), "門（8：三層疊高跳到 4.51，翻不過去，同藤蔓牆）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_seeppool", (8, 0.85, 14), "毒池（8：橫越 1.33 秒＝16 HP。高 0.85：感應區上緣 0.55 低於墊子頂面 0.7，站在島上不中毒）"),
 ]
 
 ## 相鄰的兩塊地板：兩者的頂面要等高，而且沿著接縫不能有空隙。
@@ -366,7 +367,7 @@ def check_with_godot():
         notes.append(f"Godot 匯入檢查：{'無問題' if not errors else f'{len(errors)} 個錯誤'}")
         check_scripts_compile(godot)
         check_reach(godot)
-        check_plates(godot)
+        check_beats(godot)
         return
     notes.append("Godot 執行檔無法用 --import 或 --editor --quit 執行，跳過")
 
@@ -401,33 +402,33 @@ def check_reach(godot):
     notes.append(summary[-1].replace("[Reach] ", "打得到檢查：") if summary else "打得到檢查：跑過了")
 
 
-def check_plates(godot):
-    """壓力板真的秤得到重量嗎、門真的沉下去嗎。
+def check_beats(godot):
+    """第一章的機關真的照規則跑嗎。
 
-    跑 `scenes/tools/plate_probe.tscn`：開一個 host、把真的木箱放上板子、
+    跑 `scenes/tools/beat_probe.tscn`：開一個 host、把真的木箱放上板子、
     讓真的玩家站上去再倒地，一路走真的程式碼。
 
     `check_reach` 驗的是靜態的東西（門接得到、門檻抬得動），這一支驗行為。
-    這個機關的四條規則沒有一條看得出來壞了——秤錯重量的板子看起來完全正常，
-    只是永遠踩不開或永遠開著。
+    這些規則沒有一條看得出來壞了——秤錯重量的板子看起來完全正常，只是永遠
+    踩不開；毒池的感應區高兩公分，站在池中央石頭上的人就會莫名其妙掉血。
     """
     result = subprocess.run(
         [godot, "--headless", "--path", str(PROJECT),
-         "res://scenes/tools/plate_probe.tscn"],
+         "res://scenes/tools/beat_probe.tscn"],
         capture_output=True, text=True, timeout=300,
     )
     lines = [
         line.strip() for line in (result.stdout + result.stderr).split("\n")
-        if "[Plate]" in line
+        if "[Beat]" in line
     ]
     if not lines:
-        notes.append("壓力板檢查：探針沒有輸出，跳過")
+        notes.append("機關檢查：探針沒有輸出，跳過")
         return
     for line in lines:
         if "條規則" not in line:
-            problems.append(line.replace("[Plate] ", "壓力板："))
+            problems.append(line.replace("[Beat] ", "機關："))
     summary = [line for line in lines if "條規則" in line]
-    notes.append(summary[-1].replace("[Plate] ", "壓力板：") if summary else "壓力板：跑過了")
+    notes.append(summary[-1].replace("[Beat] ", "機關：") if summary else "機關：跑過了")
 
 
 def check_scripts_compile(godot):

@@ -144,6 +144,20 @@ func apply_damage(slot_id: int, amount: float, impulse: Vector3) -> void:
 		_apply_down.rpc(slot_id, impulse)
 
 
+## 場景補給的回血（docs/04 治療系統的第二層）。蘋果、圖騰站、掉落都走這裡。
+##
+## **不要用 apply_damage(slot, -amount) 代替。** 那條路只有下限 maxf(…, 0.0)
+## 沒有上限，蘋果會把人補到 100 以上——而 100 是全遊戲唯一的血量上限，
+## 破了它之後「還剩幾成血」這件事就再也讀不出來了。
+##
+## 倒地的人補不了：血量歸零不能自行復活，扶起是隊友的工作（docs/04）。
+## 那條路是 _apply_revive，不是這裡。
+func apply_heal(slot_id: int, amount: float) -> void:
+	if not NetworkService.is_host() or is_downed(slot_id):
+		return
+	_apply_health.rpc(slot_id, minf(health_of(slot_id) + amount, MAX_HEALTH))
+
+
 # --- 廣播 -------------------------------------------------------------------
 
 @rpc("authority", "call_local", "reliable")

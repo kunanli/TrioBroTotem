@@ -29,6 +29,14 @@ const REVIVE_RANGE := 14.0
 const STUCK_TIME := 0.8
 const STUCK_SPEED := 0.6
 
+## 危險區（hazards 群組）的安全邊界，以及泡在裡面時要往外走多遠。
+##
+## **穿過去沒關係，站在裡面不行。** 人類也會直接淌過毒池，一個永遠不肯過河
+## 的隊友比一個會受傷的隊友糟得多——它會卡在池邊來回抖，而門的另一頭沒人。
+## 所以這裡擋的只有兩件事：以危險區為目的地，以及沒事泡在裡面。
+const HAZARD_MARGIN := 1.0
+const HAZARD_ESCAPE := 4.0
+
 var _stuck := 0.0
 var _was_moving := false
 var _target_position := Vector3.ZERO
@@ -51,6 +59,17 @@ func think(me: PlayerCharacter, intent: PlayerIntent) -> void:
 		if not _try_fight(me, intent):
 			_follow(me)
 
+	# 目的地在危險區裡就放棄它。站在毒池裡等你的 AI 會自己倒下去，
+	# 然後離「全隊倒地＝本章失敗」只剩一步。
+	if _has_target and _hazard_at(me, _target_position) != null:
+		_has_target = false
+	# 沒有目的地卻泡在危險區裡：往外走。_follow 有遲滯，站在人旁邊時不會
+	# 產生目的地——少了這一條，它就會安安靜靜地泡到倒。
+	if not _has_target:
+		var here := _hazard_at(me, me.global_position)
+		if here != null:
+			_aim_at(_escape_from(me, here), true)
+
 	if _has_target:
 		var offset := _target_position - me.global_position
 		offset.y = 0.0
@@ -67,6 +86,10 @@ func _try_revive(me: PlayerCharacter, intent: PlayerIntent) -> bool:
 	for node in me.get_tree().get_nodes_in_group("player_characters"):
 		var other: PlayerCharacter = node
 		if other == me or not other.is_downed or other.carried_by_slot >= 0:
+			continue
+		# 倒在危險區裡的人不去扶——先拖出來是人類的工作（Carryable 那條路
+		# 已經有了）。跑進去扶只會變成兩個人躺在毒池裡。
+		if _hazard_at(me, other.global_position) != null:
 			continue
 		var distance := me.global_position.distance_to(other.global_position)
 		if distance < best:
@@ -127,6 +150,28 @@ func _aim_at(position: Vector3, should_move: bool) -> void:
 	if should_move:
 		_target_position = position
 		_has_target = true
+
+
+## 這個點壓在哪一個危險區上（含 HAZARD_MARGIN 的邊界），沒有就回 null。
+##
+## 距離直接用 CombatSystem.reach()：它算的是「離這個節點的碰撞外框最近有多遠」，
+## 正是這裡要的東西，而且它已經被攻擊判定驗過了（藤蔓牆打不破那個血案就是
+## 為了它才修的）。用原點對原點的話，一池 8×14 的毒液會被當成一個點。
+func _hazard_at(me: PlayerCharacter, where: Vector3) -> Node3D:
+	for node in me.get_tree().get_nodes_in_group("hazards"):
+		var hazard: Node3D = node
+		if CombatSystem.reach(where, hazard) <= HAZARD_MARGIN:
+			return hazard
+	return null
+
+
+## 離開這一池要往哪走。就是它的反方向——沒有尋路，這是唯一誠實的答案。
+func _escape_from(me: PlayerCharacter, hazard: Node3D) -> Vector3:
+	var away := me.global_position - hazard.global_position
+	away.y = 0.0
+	if away.length_squared() < 0.01:
+		away = Vector3.RIGHT
+	return me.global_position + away.normalized() * HAZARD_ESCAPE
 
 
 ## 沒有尋路，撞到東西時靠跳躍脫困。這是「只做被動配合」的代價，

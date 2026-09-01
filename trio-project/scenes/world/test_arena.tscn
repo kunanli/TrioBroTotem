@@ -1,4 +1,4 @@
-[gd_scene load_steps=55 format=3]
+[gd_scene load_steps=59 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/crate.tscn" id="1_crate"]
 [ext_resource type="PackedScene" path="res://scenes/world/mud_puppet.tscn" id="2_puppet"]
@@ -17,6 +17,8 @@
 [ext_resource type="PackedScene" path="res://scenes/world/boil.tscn" id="s_boil"]
 [ext_resource type="PackedScene" path="res://scenes/world/plate.tscn" id="s_plate"]
 [ext_resource type="PackedScene" path="res://scenes/world/gate.tscn" id="s_gate"]
+[ext_resource type="Script" path="res://scripts/world/corruption_pool.gd" id="s_pool"]
+[ext_resource type="PackedScene" path="res://scenes/world/apple.tscn" id="s_apple"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_start"]
 size = Vector3(14, 1, 28)
@@ -129,6 +131,12 @@ size = Vector3(1, 8, 11)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_alcoven"]
 size = Vector3(13, 8, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_seeppool"]
+size = Vector3(8, 0.85, 14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_alcovepool"]
+size = Vector3(8, 0.85, 8)
 
 [node name="TestArena" type="Node3D"]
 
@@ -572,3 +580,27 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 2.4, -13.5)
 needed_weight = 25.0
 gate_path = NodePath("../BankGate")
 objective = "Get 25 onto the plate on the ledge to open the last gate\n(stack up and carry a crate over — or throw one up)"
+
+[node name="SeepPool" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0.125, 35.5)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("s_pool")
+
+[node name="Collision" type="CollisionShape3D" parent="SeepPool"]
+shape = SubResource("BoxShape3D_seeppool")
+
+[node name="AlcovePool" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 0.125, 22)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("s_pool")
+
+[node name="Collision" type="CollisionShape3D" parent="AlcovePool"]
+shape = SubResource("BoxShape3D_alcovepool")
+
+[node name="AppleA" parent="." instance=ExtResource("s_apple")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.5, 0.45, 35.5)
+
+[node name="AppleB" parent="." instance=ExtResource("s_apple")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.45, 34)

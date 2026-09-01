@@ -248,6 +248,9 @@ python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
 |---|---|---|
 | 重量壓力板 | `scripts/world/weight_plate.gd` | 場景檔上的 `needed_weight`（要多重才開）、`latch`（開了要不要關回去）、`gate_path`（連著哪一道門）、`objective`（目標列那一句）；腳本裡的 `GATE_DROP`／`GATE_SPEED`（門沉多深、多快）與 `GLOW_IDLE`／`GLOW_FULL`（板子的自發光範圍） |
 | 門 | `scenes/world/gate.tscn`（**沒有腳本**，由板子推） | 高 8 公尺是尺寸表上的數字，不能自己改；板子五片是 `MeshInstance3D`，`cast_shadow = 0` |
+| 腐化毒池 | `scripts/world/corruption_pool.gd` | 場景檔上的 `damage_per_second`（12＝玩家一記輕擊）；腳本裡的 `TICK`、`SURFACE_ALPHA`／`SURFACE_GLOW_MIX`（水面多濃多紫）、`MIST_*`（霧氣粒子）。**尺寸改關卡檔裡那個 `BoxShape3D`，水面與霧氣會自己跟著長** |
+| 蘋果 | `scripts/world/pickup.gd` | 場景檔上的 `heal`（35，跟 `DownSystem.REVIVE_HEAL` 同一個量）；腳本裡的 `BOB_*`／`SPIN_SPEED` |
+| AI 避開危險區 | `scripts/player/ai_brain.gd` | `HAZARD_MARGIN`（離多近算危險）、`HAZARD_ESCAPE`（往外走多遠） |
 
 **第一章的兩塊板子**：前廳中央的墊子上要 50（石頭 35 ＋ 木箱 25、或兩個木箱、
 或豬自己站上去），遠岸 2.4 公尺台上的要 25（木箱一個，或蛙／豬自己站上去）。
@@ -257,9 +260,17 @@ python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
 `latch` 在第一章一定要是 `true`：不閂住的話，撐著門的人一倒地隊伍就被一道牆
 分開，而這一章沒有檢查點。它存在是為了第二章的控制點以後可以用 `false`。
 
-改完跑 `godot --headless --path trio-project res://scenes/tools/plate_probe.tscn`，
-它會開一個 host、把真的木箱放上去、讓真的玩家站上去再倒地，驗五條規則。
-`check_project.py` 每次都會跑它。
+**毒池的複製面是零**：沒有同步器、沒有 RPC。host 呼叫 `DownSystem.apply_damage()`
+（本來就是 host-only 而且會廣播血量），表演每一端自己演——毒池是 `Area3D`，
+每一端都看得到誰站在裡面，回饋不需要任何一條訊息。
+
+改完跑 `godot --headless --path trio-project res://scenes/tools/beat_probe.tscn`，
+它會開一個 host、把真的木箱放上板子、讓真的玩家泡進毒池再吃蘋果，並且分三個
+乾淨的場景驗 AI 的三道避讓，總共 17 條規則。`check_project.py` 每次都會跑它。
+
+> **驗 AI 的時候一定要清場**（`_clear_stage()`）。泥偶會自己亂走，而探針跑到
+> 那裡已經模擬了十秒的物理；前面幾條規則也留下了幾個倒在各處的角色。實測
+> 三道避讓各自被「場上剛好有別的東西」救過一次，看起來全綠、其實沒驗到。
 
 ### 畫面與描邊在哪調
 

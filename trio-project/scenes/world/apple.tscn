@@ -1,0 +1,23 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/pickup.gd" id="1_pickup"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/ember.tres" id="m_ember"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_apple"]
+radius = 0.9
+
+[sub_resource type="SphereMesh" id="SphereMesh_apple"]
+radius = 0.22
+height = 0.44
+
+[node name="Apple" type="Area3D"]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_pickup")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_apple")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_apple")
+material_override = ExtResource("m_ember")
