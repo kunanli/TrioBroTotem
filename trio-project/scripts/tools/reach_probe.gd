@@ -59,10 +59,38 @@ func _ready() -> void:
 		printerr("[Reach] 一個目標都沒找到——探針壞了，不是關卡對了")
 		get_tree().quit(1)
 		return
+	checked += _check_plates()
+
 	for line in _failures:
 		printerr("[Reach] %s" % line)
 	print("[Reach] 檢查了 %d 個目標，%d 個打不到" % [checked, _failures.size()])
 	get_tree().quit(1 if _failures.size() > 0 else 0)
+
+
+## 每一塊壓力板：門接得到嗎、門檻有沒有人抬得動。
+##
+## 這兩件事都會**靜默**壞掉。`gate_path` 打錯的話板子照樣亮、門完全不動，
+## 沒有任何錯誤訊息，玩家就卡在關卡中間；門檻訂得比最重的一位玩家還高的話，
+## 板子看起來完全正常，只是永遠踩不開。
+func _check_plates() -> int:
+	var heaviest := 0.0
+	for value in WeightLadder.SLOT_WEIGHTS:
+		heaviest = maxf(heaviest, float(value))
+	var checked := 0
+	for node in get_tree().get_nodes_in_group("weight_plates"):
+		var plate: Node3D = node
+		checked += 1
+		var gate := plate.get_node_or_null(NodePath(plate.get("gate_path"))) as Node3D
+		if gate == null or gate == plate:
+			_failures.append("weight_plates/%s：gate_path 指不到門（%s）" % [
+				plate.name, plate.get("gate_path")
+			])
+		var needed := float(plate.get("needed_weight"))
+		if needed > heaviest:
+			_failures.append("weight_plates/%s：門檻 %.1f 比最重的一位玩家 %.1f 還重，沒有人開得了頭" % [
+				plate.name, needed, heaviest
+			])
+	return checked
 
 
 func _check(group: String, target: Node3D) -> void:

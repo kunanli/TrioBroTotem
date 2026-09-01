@@ -1,0 +1,46 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/wood.tres" id="m_wood"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_gate"]
+size = Vector3(15, 8, 0.6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_plank"]
+size = Vector3(2.8, 8, 0.6)
+
+[node name="Gate" type="AnimatableBody3D"]
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_gate")
+
+[node name="PlankA" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, 0)
+mesh = SubResource("BoxMesh_plank")
+material_override = ExtResource("m_wood")
+cast_shadow = 0
+
+[node name="PlankB" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, -0.35, 0)
+mesh = SubResource("BoxMesh_plank")
+material_override = ExtResource("m_wood")
+cast_shadow = 0
+
+[node name="PlankC" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+mesh = SubResource("BoxMesh_plank")
+material_override = ExtResource("m_wood")
+cast_shadow = 0
+
+[node name="PlankD" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, -0.5, 0)
+mesh = SubResource("BoxMesh_plank")
+material_override = ExtResource("m_wood")
+cast_shadow = 0
+
+[node name="PlankE" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, -0.15, 0)
+mesh = SubResource("BoxMesh_plank")
+material_override = ExtResource("m_wood")
+cast_shadow = 0

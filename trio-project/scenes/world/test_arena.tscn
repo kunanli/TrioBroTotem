@@ -1,4 +1,4 @@
-[gd_scene load_steps=53 format=3]
+[gd_scene load_steps=55 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/crate.tscn" id="1_crate"]
 [ext_resource type="PackedScene" path="res://scenes/world/mud_puppet.tscn" id="2_puppet"]
@@ -15,6 +15,8 @@
 [ext_resource type="Script" path="res://scripts/world/scenery.gd" id="s_scenery"]
 [ext_resource type="PackedScene" path="res://scenes/world/totem.tscn" id="s_totem"]
 [ext_resource type="PackedScene" path="res://scenes/world/boil.tscn" id="s_boil"]
+[ext_resource type="PackedScene" path="res://scenes/world/plate.tscn" id="s_plate"]
+[ext_resource type="PackedScene" path="res://scenes/world/gate.tscn" id="s_gate"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_start"]
 size = Vector3(14, 1, 28)
@@ -552,3 +554,21 @@ max_health = 80.0
 
 [node name="BankPuppetC" parent="." instance=ExtResource("2_puppet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.5, 0.6, -12.5)
+
+[node name="HallGate" parent="." instance=ExtResource("s_gate")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 10.5, 4, 35.5)
+
+[node name="SeepPlate" parent="." instance=ExtResource("s_plate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0.7, 35.5)
+needed_weight = 50.0
+gate_path = NodePath("../HallGate")
+objective = "Put 50 of weight on the plate ahead to open the gate\n(the pig alone, or the rock and a crate together)"
+
+[node name="BankGate" parent="." instance=ExtResource("s_gate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -16.1)
+
+[node name="ShelfPlate" parent="." instance=ExtResource("s_plate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 2.4, -13.5)
+needed_weight = 25.0
+gate_path = NodePath("../BankGate")
+objective = "Get 25 onto the plate on the ledge to open the last gate\n(stack up and carry a crate over — or throw one up)"

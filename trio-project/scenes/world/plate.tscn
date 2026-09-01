@@ -1,0 +1,23 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/weight_plate.gd" id="1_plate"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/ember.tres" id="m_ember"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plate"]
+size = Vector3(1.8, 1, 1.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_plate"]
+size = Vector3(1.2, 0.16, 1.2)
+
+[node name="Plate" type="Area3D"]
+collision_layer = 0
+collision_mask = 6
+script = ExtResource("1_plate")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_plate")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.08, 0)
+mesh = SubResource("BoxMesh_plate")
+material_override = ExtResource("m_ember")
