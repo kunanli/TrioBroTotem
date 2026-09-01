@@ -75,7 +75,12 @@ def shoot(godot: str, name: str, world: str, out_root: Path) -> bool:
     for line in (result.stdout + result.stderr).splitlines():
         if "ALSA" in line or "pulse" in line or "V-Sync" in line:
             continue
-        if line.startswith("[Probe]") or "ERROR" in line or "SCRIPT ERROR" in line:
+        if (
+            line.startswith("[Probe]")
+            or "[Scenery]" in line
+            or "ERROR" in line
+            or "SCRIPT ERROR" in line
+        ):
             print("   " + line)
     shots = sorted(out_dir.glob("*.png")) if out_dir.exists() else []
     print("   %d 張 -> %s" % (len(shots), out_dir))

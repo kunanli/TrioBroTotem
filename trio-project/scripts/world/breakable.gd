@@ -20,6 +20,13 @@ const RUBBLE_SCALE := 0.18
 
 @export var max_health: float = 40.0
 
+## 這一拍在目標列上的文字。**空字串＝支線，不進主線。**
+##
+## 文字寫在關卡檔而不是這裡：每一拍要講的那句話是關卡設計，不是這個元件的行為。
+## 型別必須是 String 不是 StringName——godot-parser 解析不了 `.tscn` 裡的
+## `&"foo"`，而 check_project.py 會整檔解析每一個場景。
+@export var objective: String = ""
+
 var health: float = 0.0
 var is_broken: bool = false
 
@@ -94,3 +101,7 @@ func _collapse() -> void:
 			var bottom: float = _mesh_floor.get(mesh.get_instance_id(), 0.0)
 			mesh.scale = Vector3(1.0, RUBBLE_SCALE, 1.0)
 			mesh.position.y = bottom - box.position.y * RUBBLE_SCALE
+
+## 這一拍完成了嗎。lobby_ui 靠它決定目標列要顯示哪一句，不必認得每一種型別。
+func objective_done() -> bool:
+	return is_broken

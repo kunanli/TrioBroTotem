@@ -16,6 +16,13 @@ signal bridged
 
 const SYNC_HZ := 10.0
 
+## 這一拍在目標列上的文字。**空字串＝支線，不進主線。**
+##
+## 文字寫在關卡檔而不是這裡：每一拍要講的那句話是關卡設計，不是這個元件的行為。
+## 型別必須是 String 不是 StringName——godot-parser 解析不了 `.tscn` 裡的
+## `&"foo"`，而 check_project.py 會整檔解析每一個場景。
+@export var objective: String = ""
+
 var is_bridged: bool = false
 
 var _applied := false
@@ -105,3 +112,7 @@ func _find_log() -> Node3D:
 			best_distance = distance
 			best = prop
 	return best
+
+## 這一拍完成了嗎。lobby_ui 靠它決定目標列要顯示哪一句，不必認得每一種型別。
+func objective_done() -> bool:
+	return is_bridged

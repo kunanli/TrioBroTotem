@@ -1,0 +1,23 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/breakable.gd" id="1_breakable"]
+[ext_resource type="StandardMaterial3D" path="res://scenes/world/materials/vine_break.tres" id="m_vine"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_boil"]
+size = Vector3(1.2, 2.4, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_boil"]
+size = Vector3(1.2, 2.4, 1.2)
+
+[node name="Boil" type="StaticBody3D"]
+collision_layer = 9
+collision_mask = 0
+script = ExtResource("1_breakable")
+max_health = 40.0
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_boil")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_boil")
+material_override = ExtResource("m_vine")

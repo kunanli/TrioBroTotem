@@ -32,17 +32,31 @@ const SETTLE_FRAMES := 8
 ## yaw 0 是面向 −z（往關卡深處走的方向），PI 是回頭。
 const SHOTS := {
 	"res://scenes/world/test_arena.tscn": [
-		{"name": "01_spawn", "x": 0.0, "z": 20.0, "yaw": 0.0},
-		{"name": "02_crates", "x": 1.5, "z": 15.0, "yaw": 0.0},
-		{"name": "03_vine", "x": 0.0, "z": 13.0, "yaw": 0.0},
-		{"name": "04_stump", "x": -1.5, "z": 6.0, "yaw": 0.0},
-		{"name": "05_lip", "x": 0.0, "z": -1.0, "yaw": 0.0},
-		{"name": "06_bridge", "x": 0.0, "z": -8.0, "yaw": 0.0},
-		{"name": "07_goal", "x": 0.0, "z": -14.0, "yaw": 0.0},
+		# 前廳（yaw = PI/2 → 鏡頭在 +x 往 −x 看，也就是前廳的前進方向）
+		{"name": "01_landing", "x": 32.0, "z": 35.0, "yaw": PI * 0.5},
+		{"name": "02_hallfight", "x": 25.0, "z": 35.0, "yaw": PI * 0.5},
+		{"name": "03_seep", "x": 20.0, "z": 35.5, "yaw": PI * 0.5},
+		{"name": "04_turn", "x": 2.0, "z": 31.0, "yaw": 0.5},
+		{"name": "05_corner", "x": 0.0, "z": 26.0, "yaw": 0.0},
+		{"name": "06_alcove", "x": 22.0, "z": 28.5, "yaw": 0.0},
+		{"name": "07_spawn", "x": 0.0, "z": 20.0, "yaw": 0.0},
+		{"name": "08_crates", "x": 1.5, "z": 15.0, "yaw": 0.0},
+		{"name": "09_vine", "x": 0.0, "z": 13.0, "yaw": 0.0},
+		{"name": "10_stump", "x": -1.5, "z": 6.0, "yaw": 0.0},
+		{"name": "11_lip", "x": 0.0, "z": -1.0, "yaw": 0.0},
+		{"name": "12_bridge", "x": 0.0, "z": -8.0, "yaw": 0.0},
+		{"name": "13_goal", "x": 0.0, "z": -14.0, "yaw": 0.0},
 		# 回頭往 +z 看：全場最長的視線，也是路面共面 z-fighting 最容易現形的一張。
-		{"name": "08_lookback", "x": 0.0, "z": -14.0, "yaw": PI},
-		# 唯一一張不是玩家視角的：整條走廊的版型，用來看路的走向對不對。
-		{"name": "09_overview", "eye": Vector3(34.0, 52.0, 44.0), "at": Vector3(0.0, 0.0, -6.0)},
+		{"name": "14_lookback", "x": 0.0, "z": -14.0, "yaw": PI},
+		# 唯一一張不是玩家視角的：整個 L 的版型，用來看路的走向對不對。
+		#
+		# `no_fog`：關卡對角線約 84 公尺，`fog_depth_end` 是 70——照原樣拍整張
+		# 都是霧、什麼也判斷不出來。這是**版型圖不是氛圍圖**，霧要關掉才有用；
+		# 玩家視角的十四張一律不關，那些才是拿來判斷畫面的。
+		{
+			"name": "15_overview", "no_fog": true,
+			"eye": Vector3(62.0, 76.0, 82.0), "at": Vector3(13.0, 0.0, 11.0),
+		},
 	],
 	"res://scenes/world/camp.tscn": [
 		{"name": "01_spawn", "x": 0.0, "z": 6.0, "yaw": 0.0},
@@ -144,6 +158,9 @@ func _shoot_all(world_path: String, out_dir: String) -> void:
 ## 把鏡頭擺到取景點。玩家視角的算法跟 player_camera.gd 的 place() 一模一樣：
 ## 注視點在角色身上 0.7 倍身高處，鏡頭沿著俯角往後退 3.1 倍身高。
 func _aim(shot: Dictionary) -> void:
+	var world := get_viewport().world_3d
+	if world.environment != null:
+		world.environment.fog_enabled = not bool(shot.get("no_fog", false))
 	if shot.has("eye"):
 		_camera.global_position = shot["eye"]
 		_camera.look_at(shot["at"], Vector3.UP)

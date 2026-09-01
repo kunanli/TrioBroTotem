@@ -1,4 +1,4 @@
-[gd_scene load_steps=30 format=3]
+[gd_scene load_steps=53 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/crate.tscn" id="1_crate"]
 [ext_resource type="PackedScene" path="res://scenes/world/mud_puppet.tscn" id="2_puppet"]
@@ -14,6 +14,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/rock.tscn" id="9_rock"]
 [ext_resource type="Script" path="res://scripts/world/scenery.gd" id="s_scenery"]
 [ext_resource type="PackedScene" path="res://scenes/world/totem.tscn" id="s_totem"]
+[ext_resource type="PackedScene" path="res://scenes/world/boil.tscn" id="s_boil"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_start"]
 size = Vector3(14, 1, 28)
@@ -60,6 +61,73 @@ size = Vector3(6, 0.08, 6)
 [sub_resource type="BoxShape3D" id="BoxShape3D_socket"]
 size = Vector3(3, 2.5, 8)
 
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_corner"]
+size = Vector3(14, 1, 5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_corner"]
+size = Vector3(14, 1, 5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hall"]
+size = Vector3(48, 1, 14)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hall"]
+size = Vector3(48, 1, 14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_landing"]
+size = Vector3(16, 1, 14)
+
+[sub_resource type="BoxMesh" id="BoxMesh_landing"]
+size = Vector3(16, 1, 14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_alcove"]
+size = Vector3(12, 1, 11.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_alcove"]
+size = Vector3(12, 1, 11.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pad"]
+size = Vector3(2.4, 1.4, 2.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pad"]
+size = Vector3(2.4, 1.4, 2.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shelf"]
+size = Vector3(5, 2.4, 3.6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_shelf"]
+size = Vector3(5, 2.4, 3.6)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pillar"]
+size = Vector3(4, 3.6, 4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pillar"]
+size = Vector3(4, 3.6, 4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_cornerw"]
+size = Vector3(1, 8, 17)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_throat"]
+size = Vector3(1, 8, 2.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hallna"]
+size = Vector3(13, 8, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hallnb"]
+size = Vector3(17.5, 8, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_halls"]
+size = Vector3(49, 8, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_halle"]
+size = Vector3(1, 8, 15.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_alcovew"]
+size = Vector3(1, 8, 11)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_alcoven"]
+size = Vector3(13, 8, 1)
+
 [node name="TestArena" type="Node3D"]
 
 [node name="Scenery" type="Node3D" parent="."]
@@ -78,7 +146,7 @@ shadow_enabled = true
 shadow_bias = 0.03
 shadow_normal_bias = 1.5
 shadow_blur = 1.0
-directional_shadow_max_distance = 60.0
+directional_shadow_max_distance = 95.0
 
 [node name="Fill" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.63473, 0, -0.77273, -0.27818, 0.93301, 0.2285, 0.72097, 0.36, -0.59221, 0, 12, 0)
@@ -89,13 +157,13 @@ shadow_enabled = false
 [node name="SpawnPoints" type="Node3D" parent="."]
 
 [node name="A" type="Marker3D" parent="SpawnPoints" groups=["spawn_points"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.2, 20)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28.5, 1.8, 35.5)
 
 [node name="B" type="Marker3D" parent="SpawnPoints" groups=["spawn_points"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 20)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31.0, 1.8, 35.5)
 
 [node name="C" type="Marker3D" parent="SpawnPoints" groups=["spawn_points"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.2, 20)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33.5, 1.8, 35.5)
 
 [node name="GroundStart" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 10)
@@ -177,6 +245,7 @@ cast_shadow = 0
 
 [node name="VineWall" parent="." instance=ExtResource("5_vine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 9)
+objective = "Break the vines blocking the way (attacks work on scenery too)"
 
 [node name="StumpPlatform" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.5, 1.2, 3)
@@ -198,6 +267,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.35, -7.5)
 collision_layer = 0
 collision_mask = 4
 script = ExtResource("6_socket")
+objective = "Bridge the ravine with the log on the stump\n(the pig can carry it alone, or the frog and cat together)"
 
 [node name="Collision" type="CollisionShape3D" parent="LogSocket"]
 shape = SubResource("BoxShape3D_socket")
@@ -229,6 +299,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.8, -20)
 collision_layer = 0
 collision_mask = 2
 script = ExtResource("3_goal")
+objective = "Reach the platform to the north (3.6 m — a two-high stack still falls short)"
 
 [node name="Collision" type="CollisionShape3D" parent="GoalZone"]
 shape = SubResource("BoxShape3D_goalzone")
@@ -258,3 +329,226 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.6, 5)
 
 [node name="PuppetD" parent="." instance=ExtResource("2_puppet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.6, -16)
+
+[node name="GroundCorner" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 26)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="GroundCorner"]
+shape = SubResource("BoxShape3D_corner")
+
+[node name="Mesh" type="MeshInstance3D" parent="GroundCorner"]
+mesh = SubResource("BoxMesh_corner")
+material_override = ExtResource("m_turf")
+
+[node name="GroundHall" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, -0.5, 35.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="GroundHall"]
+shape = SubResource("BoxShape3D_hall")
+
+[node name="Mesh" type="MeshInstance3D" parent="GroundHall"]
+mesh = SubResource("BoxMesh_hall")
+material_override = ExtResource("m_turf")
+
+[node name="GroundLanding" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33, 0.1, 35.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="GroundLanding"]
+shape = SubResource("BoxShape3D_landing")
+
+[node name="Mesh" type="MeshInstance3D" parent="GroundLanding"]
+mesh = SubResource("BoxMesh_landing")
+material_override = ExtResource("m_stone")
+
+[node name="GroundAlcove" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, -0.5, 22.75)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="GroundAlcove"]
+shape = SubResource("BoxShape3D_alcove")
+
+[node name="Mesh" type="MeshInstance3D" parent="GroundAlcove"]
+mesh = SubResource("BoxMesh_alcove")
+material_override = ExtResource("m_turf")
+
+[node name="SeepPad" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 35.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="SeepPad"]
+shape = SubResource("BoxShape3D_pad")
+
+[node name="Mesh" type="MeshInstance3D" parent="SeepPad"]
+mesh = SubResource("BoxMesh_pad")
+material_override = ExtResource("m_stone")
+
+[node name="BankShelf" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1.2, -13.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="BankShelf"]
+shape = SubResource("BoxShape3D_shelf")
+
+[node name="Mesh" type="MeshInstance3D" parent="BankShelf"]
+mesh = SubResource("BoxMesh_shelf")
+material_override = ExtResource("m_stone")
+
+[node name="AlcovePillar" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.8, 22)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="AlcovePillar"]
+shape = SubResource("BoxShape3D_pillar")
+
+[node name="Mesh" type="MeshInstance3D" parent="AlcovePillar"]
+mesh = SubResource("BoxMesh_pillar")
+material_override = ExtResource("m_stone")
+
+[node name="WallCornerWest" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 4, 34.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallCornerWest"]
+shape = SubResource("BoxShape3D_cornerw")
+
+[node name="WallThroatEast" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 4, 27.25)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallThroatEast"]
+shape = SubResource("BoxShape3D_throat")
+
+[node name="WallHallNorthA" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13.5, 4, 28)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallHallNorthA"]
+shape = SubResource("BoxShape3D_hallna")
+
+[node name="WallHallNorthB" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32.75, 4, 28)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallHallNorthB"]
+shape = SubResource("BoxShape3D_hallnb")
+
+[node name="WallHallSouth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, 4, 43)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallHallSouth"]
+shape = SubResource("BoxShape3D_halls")
+
+[node name="WallHallEast" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 41.5, 4, 35.75)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallHallEast"]
+shape = SubResource("BoxShape3D_halle")
+
+[node name="WallAlcoveWest" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 4, 22)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallAlcoveWest"]
+shape = SubResource("BoxShape3D_alcovew")
+
+[node name="WallAlcoveEast" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 4, 22)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallAlcoveEast"]
+shape = SubResource("BoxShape3D_alcovew")
+
+[node name="WallAlcoveNorth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 4, 16.5)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="WallAlcoveNorth"]
+shape = SubResource("BoxShape3D_alcoven")
+
+[node name="HallCrateA" parent="." instance=ExtResource("1_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32.0, 1.0, 33.0)
+
+[node name="HallCrateB" parent="." instance=ExtResource("1_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33.4, 1.0, 38.5)
+
+[node name="HallRock" parent="." instance=ExtResource("9_rock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28.0, 1.1, 39.0)
+
+[node name="HallPuppetA" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.0, 0.6, 33.0)
+
+[node name="HallPuppetB" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.5, 0.6, 38.0)
+
+[node name="HallPuppetC" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.0, 0.6, 34.5)
+
+[node name="HallBoilA" parent="." instance=ExtResource("s_boil")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24.5, 1.2, 31.0)
+
+[node name="HallBoilB" parent="." instance=ExtResource("s_boil")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20.0, 1.2, 40.0)
+
+[node name="SeepCrateA" parent="." instance=ExtResource("1_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20.5, 0.4, 32.5)
+
+[node name="SeepCrateB" parent="." instance=ExtResource("1_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20.0, 0.4, 37.0)
+
+[node name="SeepRock" parent="." instance=ExtResource("9_rock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.5, 0.5, 34.5)
+
+[node name="CornerPuppetA" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0.6, 26.0)
+
+[node name="CornerPuppetB" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.0, 0.6, 27.0)
+
+[node name="CornerPuppetC" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0, 0.6, 24.5)
+
+[node name="CornerPuppetD" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 0.6, 24.0)
+
+[node name="CornerBoil" parent="." instance=ExtResource("s_boil")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.2, 24.0)
+
+[node name="BankPuppetA" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.0, 0.6, -12.0)
+
+[node name="BankPuppetB" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0.6, -15.5)
+
+[node name="BankBoil" parent="." instance=ExtResource("s_boil")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.5, 1.2, -14.5)
+
+[node name="BankCrate" parent="." instance=ExtResource("1_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 0.4, -12.5)
+
+[node name="AlcoveChest" parent="." instance=ExtResource("s_boil")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22.0, 4.8, 22.0)
+max_health = 80.0
+
+[node name="BankPuppetC" parent="." instance=ExtResource("2_puppet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.5, 0.6, -12.5)

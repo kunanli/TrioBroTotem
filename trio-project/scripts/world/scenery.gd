@@ -63,9 +63,43 @@ const KERB_SIZE := Vector2(0.22, 0.45)
 const KERB_HEIGHT := Vector2(0.34, 0.58)
 const KERB_TILT_DEG := 10.0
 
-## 走廊淨空的範圍。見 _check_clearance()。
-const CORRIDOR_HALF := 6.0
+## 淨空區的上下界。左右範圍改由 SceneryPlan.KEEP_CLEAR 逐關指定——
+## 寫死 |x| < 6 只涵蓋南北向的走廊，前廳是東西向的，種在裡面的裝飾會**靜默通過**。
 const CLEARANCE_FLOOR := 0.35
+
+## 淨空要查到多高。
+##
+## **不是 `ARCH_CLEARANCE`（10 公尺）**——那是拱門的高度，不是玩家的高度。
+## 三層疊高的乘客站在 3.00、跳起來摸到 4.51、身高再 1.7，六公尺半是上限。
+## 用 10 公尺去查，谷壁**刻意做的懸崖突出**（頂端往內傾）就會被算成擋路的石頭：
+## 十公尺高的地方伸出來兩公尺是氣氛，不是障礙。
+const CLEARANCE_CEILING := 6.5
+
+## 谷壁預設排幾排、每排往後退多少。後排只是為了堵掉前排之間的縫，所以退得很淺——
+## 退太多就會變成「遠處另有一道牆」而不是同一面崖壁的深度。
+##
+## 逐段可以用 `rows` 覆寫。**兩個房間之間只隔一公尺半岩石的那幾道牆只能排一排**：
+## 後排錯開半格又往後退 1.4 公尺，加起來就長到隔壁房間的地板上了。
+const ROW_COUNT := 2
+const ROW_SETBACK := 1.4
+
+## 沿著走向抖動每一根柱子的位置。
+##
+## **這個數字跟 `CLIFFS.width` 綁在一起。** 相鄰兩根最遠是 `step + 2 * ROW_JITTER`
+## ＝ 2.6 公尺，而最窄的柱子沿走向是 2.9 × cos(7°) ＝ 2.88 公尺——所以前排一定
+## 是連續的、不會開縫。本來是 ±0.5 配 2.0 的寬度，最壞情況會開到 1.2 公尺的縫，
+## 而縫後面那根柱子的**側面是被太陽照到的**：正面的明度 0.17、側面 0.55，
+## 於是整面谷壁讀起來是「深藍色的牆上畫了一排等距的淺灰色直線」。
+## 動這兩個數字之前先算一次這個不等式。
+const ROW_JITTER := 0.2
+
+## 柱體後面那一整片：退多遠、多厚、頂端在世界座標的哪個高度。
+##
+## **退得很淺、也很薄。** 前排現在保證連續（見 `ROW_JITTER`），這一片只是保險，
+## 而退太多它就會穿到牆的另一邊——前廳北牆退 2.6 公尺就正好站在凹室的地板上。
+const BACKING_SETBACK := 0.6
+const BACKING_THICKNESS := 0.6
+const BACKING_TOP_Y := 5.0
 
 const CLUMP_SIZE := Vector2(1.6, 3.4)
 const CLUMP_CLEARANCE := 1.2
@@ -96,12 +130,31 @@ func _ready() -> void:
 	if not SceneryPlan.SEEDS.has(_key):
 		push_warning("[Scenery] 沒有 %s 這一關的裝飾資料" % level_id)
 		return
-	_rng.seed = int(SceneryPlan.SEEDS[_key])
+	# **每一區各自的種子**，不是一條共用的序列。
+	#
+	# 共用一條序列的話，在既有生成之前插入新生成會把下游全部重洗——山、邊石、
+	# 草塊全變。那仍然是決定性的（三台機器還是長得一樣，正確性沒問題），
+	# 但你會失去「這次的 diff 是不是真的回歸」的判斷力，因為每次都全變。
+	_region(0)
 	_build_paths()
+	_region(1)
 	_build_kerbs()
+	_region(2)
 	_build_clumps()
+	_region(3)
 	_build_valley()
+	_region(4)
 	_build_camp()
+	# **把違規講出來。** 這份清單本來是建完就沒人看——README 寫著「結果在
+	# clearance_violations 裡」，但沒有任何一支程式讀過它，所以它從第一天起
+	# 就是一個沒人看的變數。現在每一次載入關卡都會印，截圖工具也會轉出來。
+	for line: String in clearance_violations:
+		push_warning("[Scenery] 裝飾長在走道裡：%s" % line)
+
+
+## 換到某一區自己的亂數序列。1013 是質數，只是讓相鄰區的種子別太接近。
+func _region(index: int) -> void:
+	_rng.seed = int(SceneryPlan.SEEDS[_key]) + index * 1013
 
 
 # --- 路面 -------------------------------------------------------------------
@@ -267,7 +320,12 @@ func _blocked(spot: Vector3) -> bool:
 ##
 ## 一定要避開路面：兩片共面的薄片重疊就會閃。
 func _build_clumps() -> void:
-	var spec: Dictionary = SceneryPlan.CLUMPS.get(_key, {})
+	_emit_clumps(SceneryPlan.CLUMPS.get(_key, {}), "TurfClumps")
+	# 前廳自己一區。分開是因為它離原點很遠，用同一個中心點與半徑蓋不到。
+	_emit_clumps(SceneryPlan.CLUMPS.get(StringName("%s_hall" % _key), {}), "TurfClumpsHall")
+
+
+func _emit_clumps(spec: Dictionary, node_name: String) -> void:
 	if spec.is_empty():
 		return
 	var half: Vector2 = spec["half"]
@@ -287,7 +345,7 @@ func _build_clumps() -> void:
 		made += 1
 	if made == 0:
 		return
-	_attach_mesh("TurfClumps", tool.commit(), &"turf_dark", CLUMP_LIFT, false)
+	_attach_mesh(node_name, tool.commit(), &"turf_dark", CLUMP_LIFT, false)
 
 
 func _emit_clump(tool: SurfaceTool, centre: Vector3) -> void:
@@ -402,78 +460,73 @@ func _build_valley() -> void:
 	var spec: Dictionary = SceneryPlan.CLIFFS.get(_key, {})
 	if spec.is_empty():
 		return
+	# 谷地裡面**再分一次區**。理由跟外面那五區一樣：加一段崖壁不應該讓遠山、
+	# 垂藤、斷崖、岩拱全部重洗，否則截圖 diff 每次都是「整個谷地都變了」。
 	_build_cliffs(spec)
+	_region(5)
 	_build_range(spec)
+	_region(6)
 	_build_vines(spec)
+	_region(7)
 	_build_ravine()
+	_region(8)
 	_build_arches()
 
 
 ## 前排柱體 ＋ 頂上壓的那層草。兩者一起長，草才會剛好蓋在每一根的頂端。
+##
+## 走向由 `CLIFFS.runs` 決定：每一段是 `{"axis": "z"|"x", "from", "to", "inner", "sides"}`。
+## 第一版寫死了「沿 z 走、往 ±x 長」，也就是**只做得出南北向的走廊**；
+## 前廳是東西向的，需要沿 x 走、往 ±z 長。沒有 `runs` 就用舊的
+## `z_from/z_to/inner_x` 組一段，所以既有的關卡與營地一個字都不用改。
 func _build_cliffs(spec: Dictionary) -> void:
 	var faces: Array[Transform3D] = []
 	var caps: Array[Transform3D] = []
 	var colors: Array[Color] = []
-	var z_from := float(spec["z_from"])
-	var z_to := float(spec["z_to"])
-	var step := float(spec["step"])
-	var depth_range: Vector2 = spec["depth"]
-	var width_range: Vector2 = spec["width"]
-	var height_range: Vector2 = spec["height"]
-	var base_y := float(spec["base_y"])
-	var cap := float(spec["cap_thickness"])
-	var count := int(ceil((z_to - z_from) / step))
-
-	for side: float in ([-1.0, 1.0] as Array[float]):
-		for index in count:
-			var z := z_from + step * float(index) + _rng.randf_range(-0.5, 0.5)
-			var depth := _rng.randf_range(depth_range.x, depth_range.y)
-			var width := _rng.randf_range(width_range.x, width_range.y)
-			var height := _rng.randf_range(height_range.x, height_range.y)
-			var x := side * (float(spec["inner_x"]) + depth * 0.5)
-			var yaw := float(spec["yaw_deg"])
-			var basis := Basis(Vector3.UP, deg_to_rad(_rng.randf_range(-yaw, yaw)))
-			# 頂端往內傾。垂直的牆是走廊，傾斜的牆是谷——整個效果的一半在這一行。
-			var lean := deg_to_rad(float(spec["lean_deg"]) + _rng.randf_range(-2.0, 2.0))
-			basis = basis.rotated(Vector3.BACK, lean * side)
-			var origin := Vector3(x, base_y + height * 0.5, z)
-			faces.append(Transform3D(basis.scaled(Vector3(depth, height, width)), origin))
-			# 逐實例**只動明度不動色相**，動色相就會從一片崖壁變成一堆彩色方塊。
-			colors.append(Palette.jitter(Palette.color(&"cliff_face"), _rng.randf_range(-0.08, 0.08)))
-			var top := base_y + height
-			caps.append(Transform3D(
-				basis.scaled(Vector3(depth * 1.04, cap, width * 1.04)),
-				Vector3(x, top, z)
-			))
+	var runs: Array = spec.get("runs", [])
+	if runs.is_empty():
+		runs = [{
+			"axis": "z", "from": spec["z_from"], "to": spec["z_to"],
+			"inner": spec["inner_x"], "sides": [-1.0, 1.0],
+		}]
+	for entry in runs:
+		_emit_cliff_run(spec, entry, faces, caps, colors)
 	_attach_multimesh("CliffFace", BoxMesh.new(), &"cliff_face", faces, colors)
 	_attach_multimesh("CliffCap", BoxMesh.new(), &"cliff_cap", caps)
 
 
 ## 遠山。往霧色混過去，讀出來就是空氣透視。
+##
+## 本來是**沿著 ±x 的兩條帶子**，理由是第一章那時候是一條南北向的走廊，只有
+## 東西兩側看得到天。前廳把關卡折成 L 之後這個假設就破了：站在轉角往北看是
+## 一條空的地平線，而東西兩條帶子離新的東牆只剩十一公尺——不是遠山，是
+## **貼在圍牆外面的兩排白色大板子**。
+##
+## 現在改成繞著關卡中心的一圈。距離用半徑控制，所以不管關卡往哪個方向長，
+## 「遠山永遠在遠處而且每個方向都有」這件事都還成立。
 func _build_range(spec: Dictionary) -> void:
 	var transforms: Array[Transform3D] = []
-	var x_range: Vector2 = spec["range_x"]
 	var height_range: Vector2 = spec["range_height"]
-	var z_from := float(spec["z_from"])
-	var z_to := float(spec["z_to"])
-	for side: float in ([-1.0, 1.0] as Array[float]):
-		for _index in int(spec["range_count"]):
-			var height := _rng.randf_range(height_range.x, height_range.y)
-			var origin := Vector3(
-				side * _rng.randf_range(x_range.x, x_range.y),
-				float(spec["base_y"]) + height * 0.5,
-				_rng.randf_range(z_from, z_to)
-			)
-			var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU))
-			var width_range: Vector2 = spec["range_width"]
-			transforms.append(Transform3D(
-				basis.scaled(Vector3(
-					_rng.randf_range(width_range.x, width_range.y),
-					height,
-					_rng.randf_range(width_range.x, width_range.y)
-				)),
-				origin
-			))
+	var width_range: Vector2 = spec["range_width"]
+	var radius: Vector2 = spec["range_radius"]
+	var center: Vector3 = spec["range_center"]
+	var count := int(spec["range_count"])
+	for index in count:
+		# 均分再抖動：純亂數會擠成幾團、留下幾個空的方位角。
+		var angle := TAU * float(index) / float(count) + _rng.randf_range(-0.4, 0.4)
+		var away := _rng.randf_range(radius.x, radius.y)
+		var height := _rng.randf_range(height_range.x, height_range.y)
+		var origin := center + Vector3(sin(angle), 0.0, cos(angle)) * away
+		origin.y = float(spec["base_y"]) + height * 0.5
+		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU))
+		transforms.append(Transform3D(
+			basis.scaled(Vector3(
+				_rng.randf_range(width_range.x, width_range.y),
+				height,
+				_rng.randf_range(width_range.x, width_range.y)
+			)),
+			origin
+		))
 	_attach_multimesh("DistantRange", BoxMesh.new(), &"cliff_lit", transforms)
 
 
@@ -765,22 +818,165 @@ func _build_clutter() -> void:
 	_attach_multimesh("GrassTufts", BoxMesh.new(), &"cliff_cap", tufts)
 
 
-## 裝飾禁區：**走廊中央（|x| < 6）從 0.35 公尺到岩拱下緣之間不准有任何裝飾**。
+## 裝飾禁區：**玩家走得到的地方，從 0.35 公尺到岩拱下緣之間，不准有任何裝飾。**
 ##
-## 這條線是「裝飾不能傷到可讀性與玩法」寫成的檢查，不是寫成好意。走廊裡多一根
-## 沒有碰撞的柱子，玩家就會直接穿過去——那比沒有裝飾更糟。
+## 這條線是「裝飾不能傷到可讀性與玩法」寫成的檢查，不是寫成好意。走得到的地方
+## 多一根沒有碰撞的柱子，玩家就會直接穿過去——那比沒有裝飾更糟。
 ##
-## 下限 0.35 讓半埋的邊石過關（它們露出的部分不到 0.17）；
-## 上限是岩拱的下緣，三層疊高最多摸到 9.2 公尺，碰不到。
+## 下限 0.35 讓半埋的邊石過關（露出的部分不到 0.17）；上限是岩拱的下緣，
+## 三層疊高最多摸到 9.2 公尺，碰不到。
 func _check_clearance(node_name: String, transforms: Array[Transform3D]) -> void:
+	var zones: Array = SceneryPlan.KEEP_CLEAR.get(_key, [])
+	if zones.is_empty():
+		return
 	for item in transforms:
-		var half: float = absf(item.basis.get_scale().y) * 0.5
+		var basis := item.basis
+		var half: float = absf(basis.get_scale().y) * 0.5
 		var top: float = item.origin.y + half
 		var bottom: float = item.origin.y - half
-		if absf(item.origin.x) >= CORRIDOR_HALF:
+		if top <= CLEARANCE_FLOOR or bottom >= CLEARANCE_CEILING:
 			continue
-		if top <= CLEARANCE_FLOOR or bottom >= SceneryPlan.ARCH_CLEARANCE:
-			continue
-		clearance_violations.append(
-			"%s @ x=%.2f y=%.2f…%.2f" % [node_name, item.origin.x, bottom, top]
+
+		# **只量玩家走得進去的那一段。**
+		#
+		# 量整個盒子的話，一根 16 公尺高、頂端往內傾的柱子會被算成往走道伸進
+		# 兩公尺——可是那兩公尺全在玩家搆得到的高度以上，是**刻意做的懸崖突出**，
+		# 不是擋路的石頭。所以先把盒子沿自己的 y 軸切出 0.35…6.5 公尺這一段，
+		# 再量那一段的腳印。`v` 是切出來的那一段在盒子局部 y 上的比例位置。
+		var low_v := clampf((maxf(bottom, CLEARANCE_FLOOR) - item.origin.y) / (half * 2.0), -0.5, 0.5)
+		var high_v := clampf(
+			(minf(top, CLEARANCE_CEILING) - item.origin.y) / (half * 2.0), -0.5, 0.5
 		)
+		var mid_v := (low_v + high_v) * 0.5
+		var span_v := (high_v - low_v) * 0.5
+		# 旋轉之後在世界軸上的半長：x/z 兩根基底整根算，y 那根只算切出來的比例。
+		var centre := Vector2(
+			item.origin.x + basis.y.x * mid_v, item.origin.z + basis.y.z * mid_v
+		)
+		var reach := Vector2(
+			(absf(basis.x.x) + absf(basis.z.x)) * 0.5 + absf(basis.y.x) * span_v,
+			(absf(basis.x.z) + absf(basis.z.z)) * 0.5 + absf(basis.y.z) * span_v
+		)
+		for entry in zones:
+			var box: Dictionary = entry
+			var low: Vector2 = box["min"]
+			var high: Vector2 = box["max"]
+			if centre.x + reach.x <= low.x or centre.x - reach.x >= high.x:
+				continue
+			if centre.y + reach.y <= low.y or centre.y - reach.y >= high.y:
+				continue
+			clearance_violations.append(
+				"%s @ x %.1f±%.1f z %.1f±%.1f y=%.2f…%.2f 撞到 %s…%s" % [
+					node_name, centre.x, reach.x, centre.y, reach.y, bottom, top, low, high
+				]
+			)
+			break
+
+
+## 一段谷壁。`along` 是走向、`out` 是往外長的方向，兩者都是單位向量，
+## 所以同一段程式碼南北向與東西向都做得出來。
+func _emit_cliff_run(
+	spec: Dictionary, run: Dictionary,
+	faces: Array[Transform3D], caps: Array[Transform3D], colors: Array[Color]
+) -> void:
+	var from := float(run["from"])
+	var to := float(run["to"])
+	var inner := float(run["inner"])
+	var step := float(spec["step"])
+	var count := int(ceil((to - from) / step))
+
+	for item in run["sides"]:
+		var side := float(item)
+		# **兩排，後排錯開半格。**
+		#
+		# 一排柱體之間一定有縫：間距 2.2、寬度隨機 2.0–3.4、位置再抖 ±0.5、
+		# 還帶 ±7° 的偏擺，所以最窄的那幾根之間會開到一公尺多。縫後面是天空，
+		# 而地平線那條帶子的明度是 0.821——谷壁 0.466 的兩倍。結果不是「石頭
+		# 之間有縫」，是**一面畫著等距白線的深藍色牆**，間距還剛好是 2.2 公尺，
+		# 一看就是程式生成的。後排錯開半格把每一道縫堵掉，而輪廓仍然是碎的。
+		for row in int(run.get("rows", ROW_COUNT)):
+			var row_inner := inner + float(row) * ROW_SETBACK
+			var row_shift := float(row) * step * 0.5
+			_emit_cliff_row(
+				spec, run, side, row_inner, row_shift, count, faces, caps, colors
+			)
+		_emit_cliff_backing(spec, run, side, inner, from, to, faces, colors)
+
+
+## 柱體後面那一整片。
+##
+## 錯開半格的第二排堵得掉正面看過去的縫，**堵不掉斜著看過去的**：後排離前排
+## 1.4 公尺，視線越斜、它在畫面上被推開得越多，於是縫又開了。斜看正是玩家
+## 沿著走廊走的時候最常有的角度。
+##
+## 所以背後補一整片。頂端只到離地 5 公尺——比最矮的柱子還矮，所以輪廓仍然
+## 是柱子的鋸齒，而視線高度那一段是實心的。**補得比柱子高就會變回一面平牆**，
+## 那是這一整段程式碼在避免的東西。
+func _emit_cliff_backing(
+	spec: Dictionary, run: Dictionary, side: float, inner: float,
+	from: float, to: float, faces: Array[Transform3D], colors: Array[Color]
+) -> void:
+	var vertical := String(run["axis"]) == "z"
+	var along := Vector3.BACK if vertical else Vector3.RIGHT
+	var out := Vector3.RIGHT if vertical else Vector3.BACK
+	var center := float(run.get("center", 0.0))
+	var base_y := float(spec["base_y"])
+	var height := BACKING_TOP_Y - base_y
+	var length := to - from + 2.0
+	var offset := inner + BACKING_SETBACK
+	var thick := BACKING_THICKNESS
+	var flat := along * ((from + to) * 0.5) + out * (center + side * (offset + thick * 0.5))
+	var size := (
+		Vector3(thick, height, length) if vertical else Vector3(length, height, thick)
+	)
+	faces.append(Transform3D(
+		Basis.IDENTITY.scaled(size), Vector3(flat.x, base_y + height * 0.5, flat.z)
+	))
+	# 比柱子暗一點：它是縫後面的東西，不該跟前排搶。
+	colors.append(Palette.jitter(Palette.color(&"cliff_face"), -0.14))
+
+
+## 一整排柱體。`_emit_cliff_run` 對每一邊各叫兩次（前排、錯開半格的後排）。
+func _emit_cliff_row(
+	spec: Dictionary, run: Dictionary, side: float,
+	inner: float, shift: float, count: int,
+	faces: Array[Transform3D], caps: Array[Transform3D], colors: Array[Color]
+) -> void:
+	var vertical := String(run["axis"]) == "z"
+	var along := Vector3.BACK if vertical else Vector3.RIGHT
+	var out := Vector3.RIGHT if vertical else Vector3.BACK
+	var from := float(run["from"])
+	var center := float(run.get("center", 0.0))
+	var step := float(spec["step"])
+	# 進深可以逐段覆寫。前廳的北牆與凹室之間只有一公尺半的岩石，
+	# 用預設的 1.6–3.2 會直接長進凹室的地板裡。
+	var depth_range: Vector2 = run.get("depth", spec["depth"])
+	var width_range: Vector2 = spec["width"]
+	var height_range: Vector2 = spec["height"]
+	var base_y := float(spec["base_y"])
+	var cap := float(spec["cap_thickness"])
+	var yaw := float(spec["yaw_deg"])
+	for index in count:
+		var travel := from + shift + step * float(index) + _rng.randf_range(-ROW_JITTER, ROW_JITTER)
+		var depth := _rng.randf_range(depth_range.x, depth_range.y)
+		var width := _rng.randf_range(width_range.x, width_range.y)
+		var height := _rng.randf_range(height_range.x, height_range.y)
+		var basis := Basis(Vector3.UP, deg_to_rad(_rng.randf_range(-yaw, yaw)))
+		# 頂端往內傾。垂直的牆是走廊，傾斜的牆是谷——整個效果的一半在這一行。
+		var lean := deg_to_rad(float(spec["lean_deg"]) + _rng.randf_range(-2.0, 2.0))
+		basis = basis.rotated(out.cross(Vector3.UP).normalized(), lean * side)
+		var size := (
+			Vector3(depth, height, width) if vertical else Vector3(width, height, depth)
+		)
+		var flat := along * travel + out * (center + side * (inner + depth * 0.5))
+		var origin := Vector3(flat.x, base_y + height * 0.5, flat.z)
+		faces.append(Transform3D(basis.scaled(size), origin))
+		# 逐實例**只動明度不動色相**，動色相就會從一片崖壁變成一堆彩色方塊。
+		colors.append(Palette.jitter(Palette.color(&"cliff_face"), _rng.randf_range(-0.08, 0.08)))
+		var cap_size := (
+			Vector3(depth * 1.04, cap, width * 1.04) if vertical
+			else Vector3(width * 1.04, cap, depth * 1.04)
+		)
+		caps.append(Transform3D(
+			basis.scaled(cap_size), Vector3(flat.x, base_y + height, flat.z)
+		))

@@ -180,6 +180,22 @@ DIMENSIONS = [
     ("scenes/world/test_arena.tscn", "BoxShape3D_goalplat", (7, 3.6, 7), "終點台（3.6：兩層構不著，只有三層上得去）"),
     ("scenes/world/test_arena.tscn", "BoxShape3D_wall", (1, 8, 56), "走廊（56 公尺）"),
     ("scenes/world/log.tscn", "BoxShape3D_log", (1.2, 0.7, 9), "原木（9：斷崖 7 加兩端各壓 1）"),
+    # 前廳（第一章往東長出來的那一段）。**這是補表不是改表**——上面五項一個字沒動。
+    ("scenes/world/test_arena.tscn", "BoxShape3D_landing", (16, 1, 14), "出生高台（頂面 +0.6，全關第一個高低差）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_hall", (48, 1, 14), "前廳地面（可走寬度 14，跟走廊一樣）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_shelf", (5, 2.4, 3.6), "遠岸的台（2.4：沿用樹樁的高度，不發明第八個尺寸）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_pillar", (4, 3.6, 4), "凹室的柱子（3.6：沿用終點台的高度）"),
+]
+
+## 相鄰的兩塊地板：兩者的頂面要等高，而且沿著接縫不能有空隙。
+##
+## 尺寸表擋不掉這一類：凹室的地板 (12,1,10) 與前廳的地板 (48,1,14) 各自都是對的，
+## 但一個在 z 17…27、一個從 z 28.5 才開始，中間**一公尺半沒有地板**。截圖上
+## 那是門口一條亮黃色的帶子（看到的是前廳地板被太陽照到的側面），走過去會掉下去。
+ADJACENT_FLOORS = [
+    ("GroundAlcove", "BoxShape3D_alcove", "GroundHall", "BoxShape3D_hall", "z", "凹室接前廳"),
+    ("GroundCorner", "BoxShape3D_corner", "GroundHall", "BoxShape3D_hall", "z", "轉角接前廳"),
+    ("GroundStart", "BoxShape3D_start", "GroundCorner", "BoxShape3D_corner", "z", "走廊接轉角"),
 ]
 
 
@@ -195,15 +211,53 @@ def _box_sizes(text):
     return out
 
 
-def _node_z(text, node_name):
-    """節點 transform 的 z 位移。"""
+def _node_origin(text, node_name):
+    """節點 transform 的位移，(x, y, z)。找不到回傳 None。"""
     block = re.search(
         r'\[node name="%s"[^\]]*\]\n(?:(?!\n\[node ).)*' % node_name, text, re.S
     )
     if block is None:
         return None
     origin = re.search(r"transform = Transform3D\((?:[-\d.e]+, ){9}([-\d.e]+), ([-\d.e]+), ([-\d.e]+)\)", block.group(0))
-    return float(origin.group(3)) if origin else None
+    if origin is None:
+        return None
+    return tuple(float(origin.group(i)) for i in (1, 2, 3))
+
+
+def _node_z(text, node_name):
+    """節點 transform 的 z 位移。"""
+    origin = _node_origin(text, node_name)
+    return None if origin is None else origin[2]
+
+
+def check_floor_gaps():
+    """相鄰的兩塊地板：頂面等高、接縫不能有空隙。"""
+    arena = (PROJECT / "scenes/world/test_arena.tscn").read_text(encoding="utf-8")
+    sizes = _box_sizes(arena)
+    axis_index = {"x": 0, "z": 2}
+    for near_name, near_id, far_name, far_id, axis, why in ADJACENT_FLOORS:
+        near, far = _node_origin(arena, near_name), _node_origin(arena, far_name)
+        if near is None or far is None or near_id not in sizes or far_id not in sizes:
+            problems.append(f"test_arena.tscn: 量不到 {near_name} 與 {far_name} 的接縫（{why}）")
+            continue
+        index = axis_index[axis]
+        near_top = near[1] + sizes[near_id][1] / 2
+        far_top = far[1] + sizes[far_id][1] / 2
+        if abs(near_top - far_top) > 0.001:
+            problems.append(
+                f"test_arena.tscn: {near_name} 頂面 {near_top:.2f}、{far_name} 頂面 {far_top:.2f}"
+                f"，接在一起的地板要等高（{why}）"
+            )
+        low, high = sorted((near, far), key=lambda o: o[index])
+        low_id = near_id if low is near else far_id
+        high_id = far_id if low is near else near_id
+        gap = (high[index] - sizes[high_id][index] / 2) - (low[index] + sizes[low_id][index] / 2)
+        if gap > 0.001:
+            problems.append(
+                f"test_arena.tscn: {near_name} 與 {far_name} 中間有 {gap:.2f} 公尺沒有地板"
+                f"（{why}）——走過去會掉下去"
+            )
+    notes.append(f"地板接縫：檢查了 {len(ADJACENT_FLOORS)} 處")
 
 
 def check_dimensions():
@@ -296,15 +350,105 @@ def check_with_godot():
         output = result.stdout + result.stderr
         if "Unknown main loop type" in output or "unknown argument" in output.lower():
             continue
+        # `SCRIPT ERROR:` 自己就算數，**不要求同一行有 res://**。
+        #
+        # Godot 把檔案路徑印在**下一行**（`at: GDScript::reload (res://...)`），
+        # 所以舊的 `and "res://" in line` 會把
+        # `SCRIPT ERROR: Parse Error: Function "x()" not found in base self.`
+        # 整條濾掉——腳本根本編不過，這裡卻報「無問題」。實際踩過一次。
         errors = [
             line.strip() for line in output.split("\n")
-            if ("ERROR" in line or "SCRIPT ERROR" in line) and "res://" in line
+            if "SCRIPT ERROR" in line or ("ERROR" in line and "res://" in line)
         ]
         for error in dict.fromkeys(errors):
             problems.append(f"Godot: {error}")
-        notes.append(f"Godot 編譯檢查：{'無問題' if not errors else f'{len(errors)} 個錯誤'}")
+        notes.append(f"Godot 匯入檢查：{'無問題' if not errors else f'{len(errors)} 個錯誤'}")
+        check_scripts_compile(godot)
+        check_reach(godot)
         return
     notes.append("Godot 執行檔無法用 --import 或 --editor --quit 執行，跳過")
+
+
+def check_reach(godot):
+    """每一個要打的東西，真的有地方站得到嗎？
+
+    跑 `scenes/tools/reach_probe.tscn`：它把關卡整個載起來、對每一個
+    `breakables`／`log_sockets` 的成員在周圍地面上找立足點，然後用 host 判定
+    時真正呼叫的那一支 `CombatSystem.reach()` 量距離。
+
+    這一關的由來是一次很難看的失誤：藤蔓牆加高之後打不破、第一章通不了關，
+    而當時的驗證直接呼叫 `take_hit()`、**繞過了整條攻擊路徑**，所以什麼都沒測到。
+    純靜態檢查抓不到這一類——要有碰撞形狀真的進了物理空間才量得出來。
+    """
+    result = subprocess.run(
+        [godot, "--headless", "--path", str(PROJECT),
+         "res://scenes/tools/reach_probe.tscn"],
+        capture_output=True, text=True, timeout=300,
+    )
+    lines = [
+        line.strip() for line in (result.stdout + result.stderr).split("\n")
+        if "[Reach]" in line
+    ]
+    if not lines:
+        notes.append("打得到檢查：探針沒有輸出，跳過")
+        return
+    for line in lines:
+        if "打不到" in line and "個打不到" not in line or "：" in line and "公尺" in line:
+            problems.append(line.replace("[Reach] ", ""))
+    summary = [line for line in lines if "檢查了" in line]
+    notes.append(summary[-1].replace("[Reach] ", "打得到檢查：") if summary else "打得到檢查：跑過了")
+
+
+def check_scripts_compile(godot):
+    """逐支腳本跑 Godot 的 `--check-only`，也就是真的編一次。
+
+    **為什麼需要這一關**：`--import` 不編腳本。一支呼叫了不存在的函式的腳本
+    在它眼裡完全乾淨——實際踩過一次：scenery.gd 少了一個函式，check_project
+    報「無問題」，直到跑起遊戲才看到 `Parse Error: Function not found`。
+    gdparse 也擋不住，它只驗語法、不解析呼叫。
+
+    **這一關的死角要講清楚**：`--check-only --script X` 是把 X 單獨編一次，
+    **autoload 沒有註冊**，所以任何用到 NetworkService、DownSystem…的腳本
+    會停在「Identifier not found」而編不下去。那些檔案這裡驗不到，
+    只能靠 check_wiring 的 autoload 成員比對與實際跑起來。
+    這裡只回報「真的編過而且過了幾支」，不假裝全部都驗了。
+    """
+    import subprocess
+
+    settings = (PROJECT / "project.godot").read_text(encoding="utf-8")
+    block = re.search(r"\[autoload\](.*?)(?:\n\[|\Z)", settings, re.S)
+    autoloads = set(re.findall(r"^(\w+)=", block.group(1), re.M)) if block else set()
+
+    scripts = sorted(PROJECT.glob("scripts/**/*.gd"))
+    broken, skipped = [], 0
+    for script in scripts:
+        res = "res://" + str(script.relative_to(PROJECT)).replace("\\", "/")
+        try:
+            result = subprocess.run(
+                [godot, "--headless", "--path", str(PROJECT), "--check-only", "--script", res],
+                capture_output=True, text=True, timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            notes.append(f"Godot 腳本編譯檢查跑不起來，跳過（{error}）")
+            return
+        lines = [
+            line.strip() for line in (result.stdout + result.stderr).split("\n")
+            if "SCRIPT ERROR" in line or "Parse Error" in line
+        ]
+        blocked = any(
+            f"Identifier not found: {name}" in line for line in lines for name in autoloads
+        )
+        if blocked:
+            skipped += 1
+            continue
+        for line in lines:
+            broken.append(f"{script.relative_to(ROOT)}: {line}")
+    for line in dict.fromkeys(broken):
+        problems.append(line)
+    notes.append(
+        f"Godot 腳本編譯：{len(scripts) - skipped}/{len(scripts)} 支編過"
+        f"（{skipped} 支用到 autoload，單獨編不了，靠 check_wiring 與實際執行擋）"
+    )
 
 
 def check_model_sizes():
@@ -375,6 +519,7 @@ def main():
     run_optional(check_indentation())
     check_materials()
     check_dimensions()
+    check_floor_gaps()
     check_model_sizes()
     check_wiring()
     check_with_godot()

@@ -19,6 +19,13 @@ const RECHECK_INTERVAL := 0.2
 ## 需要幾個人同時在區域內。1 = 有人站上去就算過。
 @export var needed: int = 1
 
+## 這一拍在目標列上的文字。**空字串＝支線，不進主線。**
+##
+## 文字寫在關卡檔而不是這裡：每一拍要講的那句話是關卡設計，不是這個元件的行為。
+## 型別必須是 String 不是 StringName——godot-parser 解析不了 `.tscn` 裡的
+## `&"foo"`，而 check_project.py 會整檔解析每一個場景。
+@export var objective: String = ""
+
 
 var inside_count: int = 0
 var is_cleared: bool = false
@@ -97,3 +104,7 @@ func _slot_of(body: Node3D) -> int:
 	if not body.is_in_group("player_characters"):
 		return -1
 	return int(body.get("slot_id"))
+
+## 這一拍完成了嗎。lobby_ui 靠它決定目標列要顯示哪一句，不必認得每一種型別。
+func objective_done() -> bool:
+	return is_cleared

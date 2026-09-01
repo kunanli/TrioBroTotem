@@ -126,22 +126,37 @@ func _process(delta: float) -> void:
 ##
 ## 只寫最終目標的話，玩家在藤蔓前面卡住時看到的是「站上北邊的高台」——
 ## 那不是他現在該解的問題。一次只講一件事。
+##
+## ## 為什麼是掃群組加排序，不是任務系統
+##
+## 舊版寫死「掃 breakables → 掃 log_sockets → 終點」。關卡裡多了七個腐化膿包
+## 之後，那條路會為**每一個膿包**亮起「Break the vines blocking the way」。
+##
+## 現在每一拍自己帶著那句話（`objective` export，空字串＝支線不進主線）與
+## 一個 `objective_done()`，這裡只負責挑。**順序用 z 由大到小**，因為關卡在 z
+## 上是單調的（前廳 +35 一路走到終點 −20）——順序是版型的性質，不是要另外
+## 維護的一份資料。哪天真的不單調了，再加一個 order export 就好，別提早做。
 func _current_step() -> String:
 	if not GameFlow.is_in_mission():
 		return (
 			"Practise anything in camp. When you are ready, walk to the\n"
 			+ "mission board to the north and press E to set out."
 		)
-	for node in get_tree().get_nodes_in_group("breakables"):
-		if not node.is_broken:
-			return "Break the vines blocking the way (attacks work on scenery too)"
-	for node in get_tree().get_nodes_in_group("log_sockets"):
-		if not node.is_bridged:
-			return (
-				"Bridge the ravine with the log on the stump\n"
-				+ "(the pig can carry it alone, or the frog and cat together)"
-			)
-	return "Reach the platform to the north (3.6 m — a two-high stack still falls short)"
+	var pending: Array[Node3D] = []
+	for group in ["breakables", "log_sockets", "weight_plates", "goal_zones"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var beat: Node3D = node
+			if String(beat.get("objective")).is_empty():
+				continue
+			if beat.objective_done():
+				continue
+			pending.append(beat)
+	if pending.is_empty():
+		return "Everything here is done — head for the platform to the north"
+	pending.sort_custom(
+		func(a: Node3D, b: Node3D) -> bool: return a.global_position.z > b.global_position.z
+	)
+	return String(pending[0].get("objective"))
 
 
 func _refresh_objective() -> void:
