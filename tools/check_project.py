@@ -169,6 +169,77 @@ def check_materials():
     notes.append(f"共用材質：{len(sync_materials.WANTED)} 份與 palette.gd 一致")
 
 
+# docs/07 第一章的尺寸表。**這些數字是從實測的移動能力反推出來的**
+# （單人跳 1.51／兩層疊高 3.11／三層疊高 4.51），改任何一個之前要先重新量。
+#
+# 這張表存在是因為 docs/07 寫著「有斷言擋著」——在此之前那句話是假的：
+# 上一輪的檢查寫在用完就刪的探針裡，repo 裡一個 assert 都沒有。
+DIMENSIONS = [
+    ("scenes/world/vine_wall.tscn", "BoxShape3D_vine", (4, 8, 0.6), "藤蔓牆（寬 4 受 HIT_RANGE 2.6 限制）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_stump", (5, 2.4, 5), "樹樁台（2.4：跳不上去，兩層疊高上得去）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_goalplat", (7, 3.6, 7), "終點台（3.6：兩層構不著，只有三層上得去）"),
+    ("scenes/world/test_arena.tscn", "BoxShape3D_wall", (1, 8, 56), "走廊（56 公尺）"),
+    ("scenes/world/log.tscn", "BoxShape3D_log", (1.2, 0.7, 9), "原木（9：斷崖 7 加兩端各壓 1）"),
+]
+
+
+def _box_sizes(text):
+    """{sub_resource id: (x, y, z)}"""
+    out = {}
+    for block in re.split(r"^\[sub_resource ", text, flags=re.M)[1:]:
+        head = block.split("]", 1)[0]
+        name = re.search(r'id="([^"]+)"', head)
+        size = re.search(r"size = Vector3\(([-\d., ]+)\)", block)
+        if name and size:
+            out[name.group(1)] = tuple(float(v) for v in size.group(1).split(","))
+    return out
+
+
+def _node_z(text, node_name):
+    """節點 transform 的 z 位移。"""
+    block = re.search(
+        r'\[node name="%s"[^\]]*\]\n(?:(?!\n\[node ).)*' % node_name, text, re.S
+    )
+    if block is None:
+        return None
+    origin = re.search(r"transform = Transform3D\((?:[-\d.e]+, ){9}([-\d.e]+), ([-\d.e]+), ([-\d.e]+)\)", block.group(0))
+    return float(origin.group(3)) if origin else None
+
+
+def check_dimensions():
+    """docs/07 那七個從實測移動能力反推的尺寸，一格都不能動。"""
+    for rel, sub_id, wanted, why in DIMENSIONS:
+        path = PROJECT / rel
+        if not path.exists():
+            problems.append(f"{rel} 不見了（docs/07 的尺寸表指著它）")
+            continue
+        sizes = _box_sizes(path.read_text(encoding="utf-8"))
+        if sub_id not in sizes:
+            problems.append(f"{rel}: 找不到 {sub_id}（docs/07：{why}）")
+            continue
+        got = sizes[sub_id]
+        if any(abs(a - b) > 0.001 for a, b in zip(got, wanted)):
+            problems.append(
+                f"{rel}: {sub_id} 是 {got}，docs/07 要求 {wanted} — {why}。"
+                "改尺寸要先重新量移動能力，並且更新 docs/07 的表"
+            )
+
+    # 斷崖寬度是**兩塊地板中間的空隙**，不是任何一個盒子的尺寸，所以要另外算。
+    arena = (PROJECT / "scenes/world/test_arena.tscn").read_text(encoding="utf-8")
+    sizes = _box_sizes(arena)
+    near_z, far_z = _node_z(arena, "GroundStart"), _node_z(arena, "GroundFar")
+    if None in (near_z, far_z) or "BoxShape3D_start" not in sizes or "BoxShape3D_far" not in sizes:
+        problems.append("test_arena.tscn: 量不到斷崖寬度（GroundStart/GroundFar 的盒子或位移不見了）")
+    else:
+        gap = (near_z - sizes["BoxShape3D_start"][2] / 2) - (far_z + sizes["BoxShape3D_far"][2] / 2)
+        if abs(gap - 7.0) > 0.001:
+            problems.append(
+                f"test_arena.tscn: 斷崖寬 {gap:.3f}，docs/07 要求 7.0"
+                "（跳不過去的 5.95 與架橋的 9.0 都靠這個數字）"
+            )
+    notes.append(f"docs/07 尺寸：比對 {len(DIMENSIONS)} 項 ＋ 斷崖寬度")
+
+
 def find_godot():
     """找 Godot 執行檔。Godot 通常是一個獨立的 exe，很少在 PATH 上。"""
     import glob
@@ -303,6 +374,7 @@ def main():
     check_scenes()
     run_optional(check_indentation())
     check_materials()
+    check_dimensions()
     check_model_sizes()
     check_wiring()
     check_with_godot()
