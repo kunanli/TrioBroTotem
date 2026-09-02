@@ -10,12 +10,21 @@ M0 技術驗證原型。角色是 Meshy 生成的模型；關卡的幾何全部�
 
 | M0 步驟 | 狀態 |
 |---|---|
-| 0. `NetworkService` + `PlayerSlot` + 三人連線基本移動 | ✅ 已寫，未在引擎驗證 |
-| 1. 抓取與投擲同步 | ✅ 已寫，未在引擎驗證 |
-| 2. **疊高同步**（最高風險） | ✅ 已寫，未在引擎驗證 |
-| 3. 倒地與救援 | ✅ 已寫，未在引擎驗證 |
+| 0. `NetworkService` + `PlayerSlot` + 三人連線基本移動 | ✅ 兩個 peer 自動化跑過 |
+| 1. 抓取與投擲同步 | ✅ 已寫，只有單機自動化驗過 |
+| 2. **疊高同步**（最高風險） | ⬜ **仍未驗證**，要真人 |
+| 3. 倒地與救援 | ✅ 已寫，只有單機自動化驗過 |
 | 3b. PhysicalBone3D ragdoll | ⬜ 下一步 |
-| 4. 在 80–150 ms 延遲下重跑驗收（TD-10） | ⬜ |
+| 4. 在 80–150 ms 延遲下重跑驗收（TD-10） | 🟡 **一半**：見下 |
+
+**第 4 步只完成了一半，這個分寸要講清楚。** `tools/netplay_test.py` 會真的起兩個
+headless 行程用 ENet 連起來，在 0 ms 與 **80 ms／1%（TD-10 的驗收檔位）**各跑一趟，
+比對兩端對世界的認知，兩邊都不准噴錯。**這是這個專案第一次同時跑兩個 peer**，
+而且它抓得到真的問題（拿掉一個 `is_broken` 的複製設定，它立刻報出來）。
+
+但 **M0 的驗收標準是「三台機器連線，疊成三層走動 30 秒不崩、不抖、不穿模」**，
+而這支證的是必要條件：兩個 peer 連得起來、跑得完、兩端一致。
+**疊高在延遲下好不好用，還是只有真人測得出來。**
 
 ## 目錄
 
@@ -251,6 +260,7 @@ python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
 | 腐化毒池 | `scripts/world/corruption_pool.gd` | 場景檔上的 `damage_per_second`（12＝玩家一記輕擊）；腳本裡的 `TICK`、`SURFACE_ALPHA`／`SURFACE_GLOW_MIX`（水面多濃多紫）、`MIST_*`（霧氣粒子）。**尺寸改關卡檔裡那個 `BoxShape3D`，水面與霧氣會自己跟著長** |
 | 蘋果 | `scripts/world/pickup.gd` | 場景檔上的 `heal`（35，跟 `DownSystem.REVIVE_HEAL` 同一個量）；腳本裡的 `BOB_*`／`SPIN_SPEED` |
 | AI 避開危險區 | `scripts/player/ai_brain.gd` | `HAZARD_MARGIN`（離多近算危險）、`HAZARD_ESCAPE`（往外走多遠） |
+| 架住（抬不動也抓得住） | `scripts/core/carryable.gd::is_lifted()` | 沒有旋鈕——**規則就是重量表**：持有者的體重加起來要超過物件才離地。要改難度就改 `WeightLadder` 或物件的 `carry_weight` |
 
 **第一章的兩塊板子**：前廳中央的墊子上要 50（石頭 35 ＋ 木箱 25、或兩個木箱、
 或豬自己站上去），遠岸 2.4 公尺台上的要 25（木箱一個，或蛙／豬自己站上去）。
@@ -418,14 +428,32 @@ M0 還沒有敵人，所以傷害來源只有兩個：**從高處摔下來**，�
 
 區網測試一定會過，然後上市炸掉。驗收必須在延遲下重跑一次。
 
+**延遲模擬是遊戲內建的，不用裝任何東西。** `scripts/net/lag_peer.gd` 是一層
+`MultiplayerPeerExtension`，包住 `ENetMultiplayerPeer`：收到的封包壓上到期時間
+排隊、加 ±25% 抖動、只丟 unreliable 的（reliable 的 ENet 自己會重送，在這裡丟掉
+測到的是「重送機制有沒有壞」）。
+
+> 這一段以前寫的是 `sudo tc qdisc … netem` 與 clumsy。**那正是 TD-10 在 2026-08
+> 決定不要的做法**——每台測試機各自安裝設定，朋友幫你測的時候不會想弄，
+> 結果就是永遠只有區網成績。README 一直沒跟上。
+
+**自動化**（兩個 headless 行程，真的用 ENet 連起來）：
+
 ```bash
-# Linux，注入到 loopback（雙向各 75ms → RTT 約 150ms）
-sudo tc qdisc add dev lo root netem delay 75ms 15ms loss 1%
-sudo tc qdisc del dev lo root      # 測完移除
+python3 tools/netplay_test.py            # 0 ms 與 80 ms／1% 兩檔都跑
+python3 tools/netplay_test.py --only=80  # 只跑驗收那一檔
 ```
 
-Windows 用 [clumsy](https://jagt.github.io/clumsy/)，filter 設
-`udp and (udp.DstPort == 27015 or udp.SrcPort == 27015)`，Lag 75ms、Drop 1%。
+它會比對兩端對世界的認知（每一拍的複製欄位、每個角色的血量與位置），
+兩邊都不准出現 `ERROR:` 或 `SCRIPT ERROR`。**兩檔都要跑**——只跑延遲那一檔的話，
+分不出「本來就壞」與「延遲之下才壞」。
+
+**手動**（要看畫面、要試手感時）：開始畫面有一個 `Network:` 下拉，或者
+
+```bash
+godot --path . -- --host --lag=80 --loss=0.01
+godot --path . -- --join=127.0.0.1 --lag=80 --loss=0.01
+```
 
 要調的三個數字都在 `player_character.gd` 最上面：`SYNC_HZ`、`REMOTE_LERP`、`TELEPORT_DISTANCE`。
 
@@ -456,6 +484,14 @@ set GODOT=C:\path\to\Godot_v4.7.2-stable_win64.exe
 python tools/check_project.py
 ```
 
+另外三支不進 `check_project.py`、要自己跑的：
+
+```bash
+python3 tools/netplay_test.py   # 兩個 peer 連起來，比對兩端的狀態
+python3 tools/shoot_level.py    # 用真的渲染器截圖
+python3 tools/build.py          # 打包（兩個 preset），Linux 那版會直接開起來試跑
+```
+
 gdparse 只驗語法，抓不到 `Color.WEBGRAY`（常數不存在）或
 `var x := obj.unknown_method()`（型別推不出來）這一類——只有引擎抓得到。
 這兩個錯誤在第一次開專案時真的出現過。
@@ -463,9 +499,19 @@ gdparse 只驗語法，抓不到 `Color.WEBGRAY`（常數不存在）或
 `$Visaul/CarryAnchor` 這種打錯的路徑在編輯器裡要執行到那一行才炸，
 而且訊息是「null instance」，離真正的原因很遠——接線檢查就是為了這一類問題。
 
-## 但這份骨架仍未在引擎裡跑過
+## 哪些東西是機器驗過的，哪些只有真人驗得了
 
-撰寫環境無法取得 Godot 執行檔。上面的檢查能抓語法與路徑錯誤，抓不到執行期行為。
+**這一節以前寫的是「撰寫環境無法取得 Godot 執行檔」，那已經不成立**——
+`check_project.py` 會用引擎編譯每一支腳本並跑三支探針，`shoot_level.py`
+用 Forward+ 真的把畫面畫出來，`netplay_test.py` 會起兩個行程連線。
+
+機器驗得到的：腳本編譯、場景結構、`.tscn` 的尺寸、地板接縫、每一個要打的東西
+打不打得到、第一章機關的 24 條行為規則、兩個 peer 在 80 ms／1% 下的狀態一致性、
+打包出來的執行檔開不開得起來。
+
+**機器驗不到、只有真人驗得了的**：疊高在延遲下好不好用（M0 的驗收標準）、
+手感、節奏、毒池的傷害是不是太狠、關卡看不看得懂。
+
 **第一次開專案時請照這個順序確認**：
 
 1. 開啟專案，看輸出面板有沒有 script parse error
@@ -481,12 +527,15 @@ gdparse 只驗語法，抓不到 `Color.WEBGRAY`（常數不存在）或
 
 這些是刻意的，不是遺漏：
 
-- **鏡頭是最簡單的環繞跟隨，沒有 SpringArm、沒有俯仰、不會避開障礙物。**
-  `SpringArm3D` 的價值（避免鏡頭穿牆）在開闊測試場地用不到，卻引進投射方向的
-  正負號慣例——第一次跑就因此把鏡頭放到角色前面。改成自己算位置。
-  轉向用「按住右鍵拖曳」而不是鎖定滑鼠，因為 M0 要在同一台機器上開三個視窗。
+- **鏡頭沒有 SpringArm，不會避開障礙物。** `SpringArm3D` 的價值（避免鏡頭穿牆）
+  在開闊測試場地用不到，卻引進投射方向的正負號慣例——第一次跑就因此把鏡頭放到
+  角色前面。改成自己算位置（`player_camera.gd`，有俯仰）。
+  **代價已經現形**：面向死路的出生點背後至少要留 5.5 公尺，否則第一幀鏡頭就在
+  石頭裡（見 docs/07 前廳那張表）。
   〈連線、營地與分屏〉列的那些鏡頭規則（疊高時誰優先、合體時共用還是各自）
   仍然未定案，那些要等有實際玩法才談得下去。
 - **一個 peer 只分配一個 slot。** `PlayerSlot` 已經支援多個，但本地分屏是上市後的事。
-- **沒有 AI 夥伴。** `PlayerSlot.is_ai` 欄位已就位，行為要等 M2。
+- **AI 夥伴只做被動配合**（跟隨、扶人、打近處的敵人、避開危險區），
+  不主動解謎。`ai_brain.gd` 的檔頭寫著為什麼：謎題一旦綁定 AI 主動執行，
+  它就變成 M2 才有的東西。
 - **連線面板不是 HUD。** 正式 HUD 見〈操作與 UI〉，M1 才做。

@@ -20,6 +20,9 @@ const SECOND := 120
 ## 驗 AI 時把不相干的角色搬到哪裡去。
 const PARK_X := 200.0
 
+## 驗架住時把原木擺在哪。走廊裡的空地，離所有機關都遠。
+const LOG_SPOT := Vector3(0.0, 0.45, 20.0)
+
 ## gdlint 的 duplicated-load：同一個場景 load 兩次要收成一個常數。
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 
@@ -39,10 +42,11 @@ func _ready() -> void:
 	await _check_pool(world)
 	await _check_apple(world)
 	_check_ai(world)
+	await _check_brace(world)
 
 	for line in _failures:
 		printerr("[Beat] %s" % line)
-	print("[Beat] 驗了 17 條規則，%d 條不成立" % _failures.size())
+	print("[Beat] 驗了 24 條規則，%d 條不成立" % _failures.size())
 	get_tree().quit(1 if _failures.size() > 0 else 0)
 
 
@@ -293,6 +297,115 @@ func _check_ai(world: Node3D) -> void:
 		"AI 泡在凹室的毒池裡卻不往外走（move %s）" % intent.move
 	)
 	brain.queue_free()
+
+
+## 架住：抓得住不等於抬得起來。
+##
+## 這一段驗的是第一章從第一天起就在說謊的那句話——遊戲內的目標列上寫著
+## 「the pig can carry it alone, or the frog and cat together」，而 `_can_lift`
+## 對還沒被拿著的東西是嚴格單人判定，所以蛙跟貓誰都開不了頭，`can_join`
+## 那條路永遠到不了。
+##
+## **原木要自己擺。** 它是 RigidBody3D，探針跑到這裡已經模擬了十幾秒，
+## 它早就從樹樁台上滾下來了——第一版就是照場景檔的位置抓，抓了個空。
+## 擺在空地上而不是樹樁台上，是因為這一段驗的是重量規則，不是那一拍的地形。
+func _check_brace(world: Node3D) -> void:
+	var log_body: Node3D = world.get_node("Log")
+	var carryable := log_body.get_node("Carryable") as Carryable
+	var socket: Node3D = world.get_node("LogSocket")
+
+	# 一、豬（50）對原木（45）：直接抬起來，維持舊行為。
+	var pig := await _stage_log(world, log_body, 0)
+	CarrySystem.request_grab(pig.slot_id)
+	await _wait(4)
+	_expect(carryable.is_lifted(), "豬 50 對原木 45 竟然抬不起來")
+	CarrySystem.request_drop(pig.slot_id)
+	await _wait(SECOND / 2)
+
+	# 二、貓（20）一個人：架得住，但原木一動也不動。
+	var cat := await _stage_log(world, log_body, 2)
+	CarrySystem.request_grab(cat.slot_id)
+	await _wait(4)
+	_expect(carryable.is_held(), "貓抓不住原木——架住沒有生效")
+	_expect(not carryable.is_lifted(), "貓 20 一個人把原木 45 抬起來了")
+	# **基準要用擺放的位置，不是抓完之後的位置。** 拿抓完之後量的話，
+	# 「架住的東西照樣飛到手上」這個 bug 會通過——它一抓就瞬移到手上，
+	# 然後停在那裡不動，所以「有沒有再移動」根本量不到那件事。
+	await _wait(SECOND / 2)
+	_expect(
+		log_body.global_position.distance_to(LOG_SPOT) < 0.4,
+		"架住的原木離開了原地（%s，應該還在 %s）" % [log_body.global_position, LOG_SPOT]
+	)
+
+	# 三、架住的東西丟不出去。
+	CarrySystem.request_throw(cat.slot_id, 1.0)
+	await _wait(4)
+	_expect(carryable.is_held(), "架住的原木被丟出去了")
+
+	# 四、架住的原木不算架橋——放手才算（log_socket 認 is_held）。
+	_expect(not bool(socket.get("is_bridged")), "架住的原木就把橋架起來了")
+
+	# 五、蛙（30）加入：20 ＋ 30 ＝ 50 > 45，這時才真的離地。
+	#     **這就是 docs/04 寫了很久、到今天才第一次成立的那句話。**
+	var frog := _actor(world, 1, LOG_SPOT + Vector3(-1.2, 0.8, 0.0))
+	await _wait(4)
+	CarrySystem.request_grab(frog.slot_id)
+	await _wait(4)
+	_expect(carryable.is_lifted(), "蛙 30 加貓 20 ＝ 50 還是抬不起原木 45")
+	_expect(carryable.is_shared(), "兩個人抓著卻不算共扛")
+	CarrySystem.request_drop(cat.slot_id)
+	CarrySystem.request_drop(frog.slot_id)
+	await _wait(SECOND / 2)
+
+	# 六、人架不住。被架住的隊友照樣走得動，那個狀態沒有意義。
+	_clear_stage()
+	var lifter := _actor(world, 2, Vector3(1.2, 0.7, 20.0))
+	var heavy := _actor(world, 0, Vector3(1.2, 0.85, 19.0))
+	await _wait(4)
+	CarrySystem.request_grab(lifter.slot_id)
+	await _wait(4)
+	var heavy_carryable := heavy.get_node("Carryable") as Carryable
+	_expect(not heavy_carryable.is_held(), "貓把豬架住了——人不該架得住")
+
+
+## 清場、把原木擺回空地、生一個指定 slot 的角色站在它旁邊。
+func _stage_log(world: Node3D, log_body: Node3D, slot_index: int) -> Node3D:
+	_clear_stage()
+	var prop := log_body as Prop
+	prop.pinned = false
+	prop.linear_velocity = Vector3.ZERO
+	prop.angular_velocity = Vector3.ZERO
+	log_body.global_position = LOG_SPOT
+	log_body.global_rotation = Vector3.ZERO
+	prop.net_position = LOG_SPOT
+	prop.net_rotation = Vector3.ZERO
+	# 站在原木**旁邊**不是上面：原木的碰撞盒是 1.2 寬，站進去會被推開。
+	# 抓取探針在角色前方 0.8 公尺、半徑 0.9，所以 1.2 公尺剛好搆得到。
+	var player := _actor(world, slot_index, LOG_SPOT + Vector3(1.2, 0.7, 0.0))
+	await _wait(4)
+	return player
+
+
+## 這個 slot 在場上的那一個角色，順便搬到指定位置。
+##
+## **一定要走 CarrySystem.find_player()，不要每次都生一個新的。** 這支探針為了
+## 不同的規則生了好幾個共用同一個 slot 的角色，而 find_player 回傳的是群組裡
+## **第一個**符合的節點——抓取判定用的是那一個。生一個新的擺在原木旁邊、
+## 然後叫 request_grab，host 會拿著兩百公尺外那個舊的去找目標，永遠抓不到，
+## 而且不會有任何錯誤訊息。第一版就是這樣，六條規則全紅。
+func _actor(world: Node3D, slot_index: int, where: Vector3) -> Node3D:
+	var slot: int = PlayerRegistry.slots[slot_index].slot_id
+	var player := CarrySystem.find_player(slot)
+	if player == null:
+		return _spawn(world, slot, where)
+	# **先站起來再搬。** 前面幾條規則把每一個 slot 都打倒過，而倒地的角色是
+	# 布娃娃——抓取探針掛在 Visual 底下，Visual 被 ragdoll 拖著，所以把身體
+	# 搬到原木旁邊也沒用，探針還留在他倒下的地方。抓不到，而且不會報錯。
+	# respawn 會把人搬回出生點，所以順序是先復活、再擺位置。
+	DownSystem.request_respawn(slot)
+	player.global_position = where
+	player.velocity = Vector3.ZERO
+	return player
 
 
 ## 把場上所有玩家與敵人搬到關卡外面，每一條規則自己擺自己要的東西。

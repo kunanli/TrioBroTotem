@@ -8,6 +8,9 @@ extends Node3D
 
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 
+## 自動化測試的掛載點。preload 不行——正式版沒有這個檔案（見 _apply_cmdline）。
+const SOAK_SCRIPT := "res://scripts/tools/soak.gd"
+
 ## 關卡沒有提供出生點時的退路。正常情況下由關卡的 SpawnPoints 決定——
 ## 第一章是線性的，出生點放錯邊會直接跳過第一個關卡（藤蔓牆），
 ## 而且沒有任何錯誤訊息，只會覺得「這關怎麼沒作用」。
@@ -88,6 +91,15 @@ func _apply_cmdline() -> void:
 		elif arg.begins_with("--loss="):
 			NetworkService.sim_loss = float(arg.split("=", true, 1)[1])
 
+	# 自動化測試用的旗標。實作在 scripts/tools/soak.gd，而 export_presets.cfg
+	# 把 scripts/tools/* 排除在正式版之外——所以出貨的 exe 拿到 --soak 只會
+	# 安靜地不理它，不會炸。這個檔案本來就是命令列的門面（--host／--lag 都在
+	# 這裡），測試旗標放這裡才找得到。
+	if _has_prefix(args, "--soak=") and ResourceLoader.exists(SOAK_SCRIPT):
+		var soak: Node = load(SOAK_SCRIPT).new()
+		soak.name = "Soak"
+		add_child(soak)
+
 	for arg in args:
 		if arg == "--host":
 			NetworkService.host_game()
@@ -98,6 +110,13 @@ func _apply_cmdline() -> void:
 				address = arg.split("=", true, 1)[1]
 			NetworkService.join_game(address)
 			return
+
+
+func _has_prefix(args: PackedStringArray, prefix: String) -> bool:
+	for arg in args:
+		if arg.begins_with(prefix):
+			return true
+	return false
 
 
 func _on_slots_changed() -> void:

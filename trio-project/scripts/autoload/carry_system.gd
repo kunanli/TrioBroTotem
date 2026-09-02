@@ -21,10 +21,14 @@ const THROW_LIFT := 0.35
 ## 放開後多久才能再抓，避免一放開就被同一個人抓回去。
 const REGRAB_COOLDOWN := 0.4
 
-## 共扛時兩人相隔多遠會脫手。
+## 手離東西多遠會脫手。
 ##
 ## 不做繩索物理（那是 M2 的事），現在只要「走太開會掉」這個規則清楚就夠了。
-## 這個值要大於原木長度，否則兩人站在原木兩端就已經超標。
+##
+## 這個值管的是**人**離得多遠，不是東西有多長：共扛時原木掛在兩人錨點的中點，
+## 所以九公尺長的原木由兩個相隔四公尺的人抬著完全合理。
+## （這裡原本的註解寫著「要大於原木長度」，那是錯的，而且一直沒事——
+## 因為共扛從來沒有真的發生過。）
 const SHARED_MAX_DISTANCE := 4.5
 
 var _cooldowns: Dictionary = {}
@@ -54,6 +58,15 @@ func _reclaim_orphans() -> void:
 func _break_stretched() -> void:
 	for node in get_tree().get_nodes_in_group("carryables"):
 		var carryable: Carryable = node
+		# 架住的東西不會跟著人走，所以人一走開就永遠拉成一條線——而且沒有
+		# 任何東西會解除它，那個人就一路被拖慢下去。走遠了就當作放手。
+		if carryable.is_held() and not carryable.is_lifted():
+			var holder := find_player(carryable.primary_holder())
+			if holder != null:
+				var reach := holder.global_position.distance_to(carryable.global_position)
+				if reach > SHARED_MAX_DISTANCE:
+					_apply_release.rpc(carryable.primary_holder(), str(carryable.get_path()), Vector3.ZERO)
+			continue
 		if not carryable.is_shared():
 			continue
 		var a := find_player(carryable.holders[0])
@@ -102,6 +115,11 @@ func request_grab(slot_id: int) -> void:
 		if heavy != null:
 			_apply_strain.rpc(str(heavy.get_path()))
 		return
+	# 架得住但抬不起來也要出聲，而且**那才是要教的那一刻**：「我抓到了，
+	# 但它不動——需要有人來幫。」抓不動的那一聲以前是給「按了沒反應」用的，
+	# 有了架住之後幾乎沒有東西是抓不動的，這一聲的意義就搬到這裡。
+	if not target.can_join(grabber.weight):
+		_apply_strain.rpc(str(target.get_path()))
 	_apply_grab.rpc(slot_id, str(target.get_path()))
 
 
@@ -132,6 +150,11 @@ func request_throw(slot_id: int, charge: float) -> void:
 	# 想丟就先讓對方放手。
 	if carryable.is_shared():
 		_apply_leave.rpc(slot_id, str(carryable.get_path()))
+		return
+	# 抬都抬不起來的東西當然丟不出去。出一聲，不要靜默地把它放掉——
+	# 玩家會以為自己丟了、然後發現東西還在腳邊。
+	if not carryable.is_lifted():
+		_apply_strain.rpc(str(carryable.get_path()))
 		return
 	_release(slot_id, _throw_velocity(grabber, carryable, charge))
 
@@ -165,13 +188,17 @@ func _is_authorised(slot_id: int) -> bool:
 	return slot != null and slot.peer_id == claimed_peer
 
 
-## 抓取判定三段（docs/04 的重量規則 + docs/07 第一章的兩人合扛）：
-##   1. 沒人拿、自己扛得動   → 單人扛
-##   2. 已經有人拿、兩人重量和扛得動 → 加入共扛
-##   3. 其餘                 → 抓不到
+## 抓取判定（docs/04 的重量規則 + docs/07 第一章的兩人合扛）：
+##   1. 已經有人拿、兩人重量和超得過 → 加入
+##   2. 沒人拿、自己扛得動           → 單人扛
+##   3. 沒人拿、扛不動、而且是「東西」→ **架住**（抓著但不離地，等人來幫）
+##   4. 其餘（扛不動的人）           → 抓不到
 ##
-## 第 2 段是「兩人合扛原木」的實作。重量表本來就支援：原木 45，
-## 豬 50 單人可扛，蛙 30 + 貓 20 = 50 兩人可扛。
+## 第 3 段是這個機制的入口，而它以前不存在。原木 45、蛙 30、貓 20，
+## **兩個人誰都開不了頭**，所以第 1 段那條路永遠到不了——共扛唯一的入口是
+## 「豬先扛起來，別人再加入」，而豬自己就扛得動。於是「蛙加貓一起扛原木」
+## 這句話寫在遊戲內的目標列上、寫在這裡、寫在 carryable.gd、寫在 docs/04，
+## **四個地方全部是假的**。
 func _best_target(grabber: Node3D) -> Carryable:
 	var best: Carryable = null
 	var best_distance := INF
@@ -193,10 +220,17 @@ func _best_target(grabber: Node3D) -> Carryable:
 func _can_lift(carryable: Carryable, grabber: Node3D) -> bool:
 	if carryable.locked:
 		return false
-	if not carryable.is_held():
-		# 相同重量抓不動，這是刻意的（docs/04）。
-		return carryable.weight < grabber.weight
-	return carryable.can_join(grabber.weight)
+	if carryable.is_held():
+		return carryable.can_join(grabber.weight)
+	# 相同重量抬不動，這是刻意的（docs/04）。
+	if carryable.weight < grabber.weight:
+		return true
+	# 架住：抬不動也抓得住。
+	#
+	# **只對東西，不對人。** 被架住的隊友照樣走得動，那個狀態沒有意義，
+	# 而且他一走開，架住的人就會被拖慢半天卻抓著空氣。扛人是另一個動詞
+	# （救援與喜劇），它的門檻維持嚴格單人判定。
+	return not carryable.body().has_method("set_carried_by")
 
 
 ## 附近最近的「抓不動」目標，用來給玩家回饋。

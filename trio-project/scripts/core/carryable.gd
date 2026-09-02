@@ -15,6 +15,8 @@ extends Node3D
 ## （docs/07）。重量表（WeightLadder）的數字本來就支援這件事：
 ## 原木 45，豬 50 一個人扛得動，蛙 30 加貓 20 剛好也是 50——
 ## 「強的一個人扛，或弱的兩個人一起扛」。
+##
+## 而這件事一直到「架住」（`is_lifted`）做出來才**第一次真的成立**。
 
 ## 最多幾個人一起扛。三個人扛一根原木在畫面上讀不出來，也沒有設計上的理由。
 const MAX_HOLDERS := 2
@@ -43,6 +45,19 @@ func is_held() -> bool:
 
 func is_shared() -> bool:
 	return holders.size() > 1
+
+
+## 抬得起來嗎——持有者的體重加起來要**超過**它。
+##
+## 這跟 can_join 是同一個不等式，只是換個問法：抓得住不等於抬得起來。
+##
+## **架住＝抓著但沒抬起來。** 物件留在原地、持有者被拖慢，等第二個人來。
+## 沒有這個狀態的話，第一章那句「蛙 30 加貓 20 一起扛原木 45」是假的——
+## 兩個人誰都開不了頭，`can_join` 那條路永遠到不了（見 carry_system 的
+## `_can_lift`）。共扛唯一的入口本來是「豬先扛起來，別人再加入」，
+## 而豬自己就扛得動，所以共扛從來沒有必要、也從來沒有發生過。
+func is_lifted() -> bool:
+	return not holders.is_empty() and holders_weight() > weight
 
 
 ## 第一個抓住的人。被扛的玩家只認得單一個持有者（set_carried_by 的介面），
@@ -105,7 +120,9 @@ func end_carry(release_velocity: Vector3) -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	if holders.is_empty():
+	# **架住的東西不跟著錨點走。** 少了 is_lifted 這一半，一抓住就會瞬移到
+	# 手上——那正好是「架住」要避免的事。
+	if not is_lifted():
 		return
 	var target := body()
 	var anchors := _anchors()
