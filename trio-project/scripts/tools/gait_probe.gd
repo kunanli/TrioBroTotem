@@ -18,6 +18,10 @@ extends Node3D
 ##
 ## 第二段是成績。**加 `--ik=0` 可以把 `FootIk` 關掉**，同一支探針就能印出
 ## 「有鎖腳」與「沒鎖腳」兩組數字——兩個數字要能比，就得出自同一條程式路徑。
+## **`--bob=0` 同理關掉 `GaitBob`**（身體起伏層）。
+##
+## 第三段是身體：每一個速度帶印髖的起伏與左右擺（公分），另外站 6 秒印頭與髖
+## 動了多少——那是「待機像不像雕像」的數字。
 ##
 ## **一切都以「一次落腳」為單位量，不累加路徑長度。** 第一版是逐幀累加位移的
 ## 長度，那把腳的橫向擺動也算進去了，自然速度因此高估了大約四成。
@@ -69,6 +73,9 @@ const LIFT_RANGE := 0.28
 const SLIP_SECONDS := 6.0
 const SLIP_SPEEDS: Array[float] = [1.2, 2.6, 4.2, 6.0]
 
+## 待機量幾秒。重心轉移每 4–7 秒換一次邊，要涵蓋至少一次。
+const IDLE_SECONDS := 8.0
+
 ## 模擬步長。跟遊戲一樣 120 Hz（project.godot），而且是固定的。
 const STEP := 1.0 / 120.0
 
@@ -113,9 +120,12 @@ func _ready() -> void:
 	for visual in _visuals:
 		_stats[visual.name] = _measure_clip(visual)
 	var with_ik := _argument("--ik=") != "0"
-	print("\n鎖腳：%s" % ("開" if with_ik else "**關**"))
+	var with_bob := _argument("--bob=") != "0"
+	print("\n鎖腳：%s　起伏：%s" % [("開" if with_ik else "**關**"), ("開" if with_bob else "**關**")])
 	for visual in _visuals:
-		await _measure_slip(visual, with_ik)
+		await _measure_slip(visual, with_ik, with_bob)
+	for visual in _visuals:
+		await _measure_idle(visual, with_bob)
 	get_tree().quit(0)
 
 
@@ -260,7 +270,7 @@ static func _natural_speed(track: Array[Array], dt: float) -> float:
 ##
 ## 走的是**真正的那條路**——`drive()`（含播放倍率與它的上限）、ProceduralPose、
 ## 之後還會有 IK 層。所以這個數字量的是玩家實際看到的東西，不是理論值。
-func _measure_slip(visual: CharacterVisual, with_ik: bool) -> void:
+func _measure_slip(visual: CharacterVisual, with_ik: bool, with_bob: bool) -> void:
 	var skeleton := _skeleton(visual)
 	var player := _animation_player(visual)
 	if skeleton == null or player == null:
@@ -273,9 +283,12 @@ func _measure_slip(visual: CharacterVisual, with_ik: bool) -> void:
 	var ik := skeleton.get_node_or_null("FootIk") as FootIk
 	if ik != null:
 		ik.active = with_ik
+	var bob := skeleton.get_node_or_null("GaitBob") as GaitBob
+	if bob != null:
+		bob.active = with_bob
 	var sampler := Sampler.new()
 	sampler.name = "GaitSampler"
-	sampler.bones = ankles
+	sampler.bones = ankles + _body(skeleton)
 	skeleton.add_child(sampler)  # 掛最後面，才看得到所有修改器的結果
 
 	var clip := visual.clip_for(&"walk")
@@ -288,15 +301,21 @@ func _measure_slip(visual: CharacterVisual, with_ik: bool) -> void:
 		var previous: Array[Vector3] = []
 		var slip := 0.0
 		var cycles := 0.0
+		var hips_lo := Vector3(INF, INF, INF)
+		var hips_hi := -hips_lo
 		var frames := int(SLIP_SECONDS / STEP)
 		for _index in frames:
 			await _advance(visual, player, speed)
 			cycles += player.speed_scale * STEP / length
-			if sampler.seen.size() < ankles.size():
+			if sampler.seen.size() < ankles.size() + 2:
 				continue
+			# 髖在角色空間的範圍：Y 是起伏、X 是左右重心。
+			var hips: Vector3 = _local_point(visual, skeleton, sampler.seen[ankles.size()])
+			hips_lo = Vector3(minf(hips_lo.x, hips.x), minf(hips_lo.y, hips.y), 0.0)
+			hips_hi = Vector3(maxf(hips_hi.x, hips.x), maxf(hips_hi.y, hips.y), 0.0)
 			var here: Array[Vector3] = []
-			for point in sampler.seen:
-				here.append(skeleton.global_transform * (point as Vector3))
+			for side in ankles.size():
+				here.append(skeleton.global_transform * (sampler.seen[side] as Vector3))
 			if previous.size() == here.size():
 				# 慢的那一隻在承重。它移動了多少，就是滑掉了多少。
 				var slowest := INF
@@ -307,16 +326,85 @@ func _measure_slip(visual: CharacterVisual, with_ik: bool) -> void:
 
 		var travelled := SLIP_SECONDS * speed
 		print(
-			"[Slip] %-12s %.1f m/s → 承重腳滑掉 %4.1f%%　每步 %4.1f cm（倍率 %.2f）"
+			(
+				"[Slip] %-12s %.1f m/s → 承重腳滑掉 %4.1f%%　每步 %4.1f cm（倍率 %.2f）"
+				+ "　髖起伏 %.1f cm　左右 %.1f cm"
+			)
 			% [
 				visual.name,
 				speed,
 				slip / travelled * 100.0,
 				slip / maxf(cycles * 2.0, 1.0) * 100.0,
 				player.speed_scale,
+				(hips_hi.y - hips_lo.y) * 100.0,
+				(hips_hi.x - hips_lo.x) * 100.0,
 			]
 		)
 	sampler.queue_free()
+
+
+## 待機像不像雕像：站 8 秒，頭與髖在角色空間動了多少。
+##
+## 這是「看不看得見在呼吸」的數字。原本呼吸振幅 0.6–1.4 度，頭動不到半公分，
+## 在遊戲鏡頭下等於零。
+func _measure_idle(visual: CharacterVisual, with_bob: bool) -> void:
+	var skeleton := _skeleton(visual)
+	var player := _animation_player(visual)
+	if skeleton == null or player == null:
+		return
+	var body := _body(skeleton)
+	if body.size() < 2:
+		return
+	var bob := skeleton.get_node_or_null("GaitBob") as GaitBob
+	if bob != null:
+		bob.active = with_bob
+	var sampler := Sampler.new()
+	sampler.name = "IdleSampler"
+	sampler.bones = body
+	skeleton.add_child(sampler)
+	visual.position = Vector3.ZERO
+	for _warm in int(WARMUP_SECONDS / STEP):
+		await _advance(visual, player, 0.0)
+	var hips_lo := Vector3(INF, INF, INF)
+	var hips_hi := -hips_lo
+	var head_lo := Vector3(INF, INF, INF)
+	var head_hi := -head_lo
+	for _index in int(IDLE_SECONDS / STEP):
+		await _advance(visual, player, 0.0)
+		if sampler.seen.size() < 2:
+			continue
+		var hips := _local_point(visual, skeleton, sampler.seen[0])
+		var head := _local_point(visual, skeleton, sampler.seen[1])
+		hips_lo = Vector3(minf(hips_lo.x, hips.x), minf(hips_lo.y, hips.y), minf(hips_lo.z, hips.z))
+		hips_hi = Vector3(maxf(hips_hi.x, hips.x), maxf(hips_hi.y, hips.y), maxf(hips_hi.z, hips.z))
+		head_lo = Vector3(minf(head_lo.x, head.x), minf(head_lo.y, head.y), minf(head_lo.z, head.z))
+		head_hi = Vector3(maxf(head_hi.x, head.x), maxf(head_hi.y, head.y), maxf(head_hi.z, head.z))
+	sampler.queue_free()
+	print(
+		"[Idle] %-12s 站 %.0f 秒 → 頭動了 %.1f cm　髖左右 %.1f cm　髖上下 %.1f cm"
+		% [
+			visual.name,
+			IDLE_SECONDS,
+			(head_hi - head_lo).length() * 100.0,
+			(hips_hi.x - hips_lo.x) * 100.0,
+			(hips_hi.y - hips_lo.y) * 100.0,
+		]
+	)
+
+
+## 取樣器記下的骨架空間的點 → 角色空間。
+func _local_point(visual: CharacterVisual, skeleton: Skeleton3D, point: Vector3) -> Vector3:
+	return visual.global_transform.affine_inverse() * (skeleton.global_transform * point)
+
+
+## 髖與頭。
+func _body(skeleton: Skeleton3D) -> Array[int]:
+	var out: Array[int] = []
+	for name in ["Hips", "Head"]:
+		var index := skeleton.find_bone(name)
+		if index >= 0:
+			out.append(index)
+	return out if out.size() == 2 else [] as Array[int]
 
 
 ## 前進一個固定步長，餵一次 drive()，推動畫，然後等真的一幀讓修改器跑。

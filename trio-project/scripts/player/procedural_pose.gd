@@ -50,6 +50,14 @@ const PIVOT_FULL_RATE := 260.0
 ## 慢了就會變成「人已經轉完了才開始倒」。
 const PIVOT_FADE_TIME := 0.08
 
+## 站著沒事時偶爾看一下旁邊：多久一次、看多久、看多偏（度）。
+##
+## 沒有這個的話待機是三尊雕像——呼吸就算放大到看得見，也只是「雕像在呼吸」。
+## 純表演、不同步，seed 逐隻固定，同一隻每次跑都一樣，方便對圖。
+const GLANCE_EVERY := Vector2(3.0, 7.0)
+const GLANCE_HOLD := Vector2(1.0, 2.0)
+const GLANCE_YAW := 25.0
+
 ## 呼吸與擺動在軀幹上的分配。
 const BREATH_SPINE := 0.6
 const BREATH_CHEST := 0.4
@@ -93,6 +101,10 @@ var _look_valid := false
 var _look_point := Vector3.ZERO
 var _look_yaw := 0.0
 var _look_pitch := 0.0
+var _rng := RandomNumberGenerator.new()
+var _glance_timer := 2.0
+var _glance_hold := 0.0
+var _glance_yaw := 0.0
 
 
 ## entry 是 CharacterRoster 的那一筆；owner_space 是角色空間的基準節點。
@@ -105,6 +117,8 @@ func configure(entry: Dictionary, owner_space: Node3D) -> void:
 	sway_period = maxf(0.1, float(pose.get("sway_period", sway_period)))
 	look_speed = float(pose.get("look_speed", look_speed))
 	class_pose = pose.get("bones", {})
+	_rng.seed = hash(String(entry.get("model", "")))
+	_glance_timer = _rng.randf_range(GLANCE_EVERY.x, GLANCE_EVERY.y)
 
 
 func set_look_target(point: Vector3) -> void:
@@ -228,6 +242,11 @@ func _build(skeleton: Skeleton3D) -> void:
 func _advance_look(delta: float) -> void:
 	var goal_yaw := 0.0
 	var goal_pitch := 0.0
+	# 站著、沒有目標的時候，偶爾看一下旁邊。有目標或在走就不插手。
+	if not _look_valid and _motion < 0.01:
+		goal_yaw = _glance(delta)
+	else:
+		_glance_hold = 0.0
 	if _look_valid:
 		var local := space.global_transform.affine_inverse() * _look_point
 		var flat := Vector2(local.x, local.z).length()
@@ -242,6 +261,20 @@ func _advance_look(delta: float) -> void:
 	var blend := 1.0 - exp(-delta * maxf(look_speed, 0.01) / LOOK_TIME)
 	_look_yaw = lerpf(_look_yaw, goal_yaw, blend)
 	_look_pitch = lerpf(_look_pitch, goal_pitch, blend)
+
+
+## 偶爾看旁邊的狀態機：等一段時間 → 挑一個方向看一下 → 回正。回傳當下想看的 yaw。
+func _glance(delta: float) -> float:
+	if _glance_hold > 0.0:
+		_glance_hold -= delta
+		return _glance_yaw
+	_glance_timer -= delta
+	if _glance_timer <= 0.0:
+		_glance_yaw = _rng.randf_range(-GLANCE_YAW, GLANCE_YAW)
+		_glance_hold = _rng.randf_range(GLANCE_HOLD.x, GLANCE_HOLD.y)
+		_glance_timer = _rng.randf_range(GLANCE_EVERY.x, GLANCE_EVERY.y)
+		return _glance_yaw
+	return 0.0
 
 
 ## 把六層疊成「骨骼位置 -> 尤拉角」。位置是 _bones 的索引，不是骨骼 id。

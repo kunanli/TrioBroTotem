@@ -42,6 +42,22 @@ static func frames(skeleton: Skeleton3D, space: Node3D, names: Array) -> Diction
 	return out
 
 
+## 骨架相對於角色節點的**完整變換**（含縮放），沿著父節點逐層相乘。
+##
+## `gait_bob.gd` 用它把角色空間的位移（公尺）換回骨架空間——骨架的單位不見得是
+## 公尺（`ragdoll.gd` 記過 Armature 帶 0.01 縮放），不要假設，一律換算。
+## 不用 global_transform 的理由同下面那個函式。
+static func relative_transform(skeleton: Skeleton3D, space: Node3D) -> Transform3D:
+	var result := Transform3D.IDENTITY
+	var walker: Node3D = skeleton
+	while walker != null and walker != space:
+		result = walker.transform * result
+		walker = walker.get_parent() as Node3D
+	if walker == null:
+		push_warning("[BoneSpace] 骨架不在角色節點底下，換算可能不對")
+	return result
+
+
 ## 骨架相對於角色節點的朝向，沿著父節點逐層相乘。
 ##
 ## 不用 global_transform：它要求節點已經在場景樹裡，時機一有變動就會噴

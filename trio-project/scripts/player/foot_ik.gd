@@ -60,9 +60,15 @@ const MAX_DRAG := 0.5
 const PASSES := 2
 
 var _legs: Array[Dictionary] = []
+var _gait_bob: GaitBob = null
 var _built := false
 var _locking := false
 var _weight := 0.0
+
+
+## 起伏層。踏地的腳要撐回去的量就是它這一幀把髖壓低的量，從它身上讀。
+func follow(gait_bob: GaitBob) -> void:
+	_gait_bob = gait_bob
 
 
 ## 現在該不該鎖腳。由 `CharacterVisual` 每幀餵——離地、倒地、布娃娃、被扛、
@@ -123,14 +129,25 @@ func _process_modification() -> void:
 		if not planted:
 			continue
 
-		# 只鎖水平。垂直交給動畫——這一輪不做貼地，腳該抬多高是它的事。
+		# 水平兩軸鎖死；垂直**只撐回 `GaitBob` 壓下去的量**。
+		#
+		# 這不是貼地——沒有射線、沒有法線。它是 `gait_bob` 的配套：那一層讓髖每一步
+		# 下沉兩三公分，踏地的腳會被帶進地面，這裡把它撐回去，膝蓋因此多彎一點——
+		# 那正是真人走路的樣子。
+		#
+		# 撐回去的量**必須剛好等於髖沉下去的量**，不能拿「踩下去時的高度」當基準。
+		# 第一版就是鎖 `locked.y`：動畫本身的腳在站立期也會往下踩幾公分，全被撐
+		# 起來，reach clamp 一介入水平的鎖就跟著丟了——起伏層還沒開，貓的腳滑就
+		# 從 5% 惡化到 15%。往上抬（跑步騰空）時是負的，不撐——腳本來就該離地。
 		var locked: Vector3 = leg["locked"]
-		var drag := Vector3(locked.x - world.x, 0.0, locked.z - world.z)
+		var flat := Vector2(locked.x - world.x, locked.z - world.z)
 		var limit := float(leg["length"]) * MAX_DRAG
-		if drag.length() > limit:
+		if flat.length() > limit:
 			# 收不住了：讓鎖定點跟著往前滑，下一幀從新的位置繼續鎖。
-			drag = drag.normalized() * limit
-			leg["locked"] = world + drag
+			flat = flat.normalized() * limit
+			leg["locked"] = Vector3(world.x + flat.x, locked.y, world.z + flat.y)
+		var lift := maxf(0.0, _gait_bob.sink) if _gait_bob != null else 0.0
+		var drag := Vector3(flat.x, lift, flat.y)
 		LimbIk.solve(
 			skeleton,
 			leg["chain"],

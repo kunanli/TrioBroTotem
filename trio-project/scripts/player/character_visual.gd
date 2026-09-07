@@ -106,6 +106,7 @@ var _player: AnimationPlayer = null
 var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
+var _gait_bob: GaitBob = null
 var _foot_ik: FootIk = null
 var _hand_ik: HandIk = null
 var _ragdoll: PhysicalBoneSimulator3D = null
@@ -185,6 +186,7 @@ func load_character(id: StringName) -> bool:
 		_recovery = RagdollRecovery.new()
 		_recovery.name = "RagdollRecovery"
 		_skeleton.add_child(_recovery)
+	_attach_gait_bob()
 	_attach_foot_ik()
 	_attach_hand_ik()
 
@@ -363,6 +365,17 @@ func _fix_cull_bounds(target_height: float) -> void:
 		mesh.extra_cull_margin = target_height * 4.0
 
 
+## 起伏層。**掛在布娃娃之後、鎖腳之前**：它移動髖，然後由鎖腳把踏地的腳留在
+## 地上、膝蓋自然彎。順序反了就是腳跟著髖一起上下飄。
+func _attach_gait_bob() -> void:
+	if _skeleton == null:
+		return
+	_gait_bob = GaitBob.new()
+	_gait_bob.name = "GaitBob"
+	_gait_bob.configure(self, String(character_id))
+	_skeleton.add_child(_gait_bob)
+
+
 ## 鎖腳層。**一定要掛在整個布娃娃區塊之後**，才會是修改器堆疊的最後一層：
 ## 它要看到的是「動畫 + 程序化姿態 + 布娃娃回復」全部疊完的腳踝位置，
 ## 不是中間某一層的。布娃娃建不起來時這裡照樣要掛，所以放在 if 外面。
@@ -371,6 +384,7 @@ func _attach_foot_ik() -> void:
 		return
 	_foot_ik = FootIk.new()
 	_foot_ik.name = "FootIk"
+	_foot_ik.follow(_gait_bob)
 	_skeleton.add_child(_foot_ik)
 
 
@@ -686,6 +700,7 @@ func drive(speed: float) -> void:
 	_moving = speed >= IDLE_SPEED
 	_drive_foot_ik()
 	_drive_hand_ik()
+	_drive_gait_bob()
 	if _player == null or _action != &"" or _freeze_timer > 0.0:
 		return
 
@@ -761,6 +776,27 @@ func _drive_hand_ik() -> void:
 		and _freeze_timer <= 0.0
 		and _punch_elapsed >= CombatSpec.PUNCH_TIME
 		and (_ragdoll == null or not _ragdoll.active)
+	)
+
+
+## 身體起伏該不該動、用哪個相位。
+##
+## 否決條件與手部 IK 同一組：離地（跳躍有自己的腿）、扛東西、一次性動作、頓幀、
+## 命中擠壓、布娃娃。**站著不動不否決**——站著時它改做重心轉移。
+## `_band` 是上一幀挑的（挑檔在這個函式之後），慢一幀沒有關係，相位切換本來就
+## 是用 0.3 秒混過去的。
+func _drive_gait_bob() -> void:
+	if _gait_bob == null:
+		return
+	_gait_bob.set_state(
+		not _airborne
+		and not _carrying
+		and _action == &""
+		and _freeze_timer <= 0.0
+		and _punch_elapsed >= CombatSpec.PUNCH_TIME
+		and (_ragdoll == null or not _ragdoll.active),
+		_moving,
+		_band >= 1
 	)
 
 

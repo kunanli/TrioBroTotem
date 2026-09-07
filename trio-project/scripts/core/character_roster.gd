@@ -45,6 +45,11 @@ extends RefCounted
 ## 手骨的三軸方向見 weapon_rack.gd 的檔頭——調這幾個數字前先看那裡。
 ##
 ## pose 是程序化姿態層的參數（scripts/player/procedural_pose.gd）。
+##
+## breath_amplitude 是**放大過的**。原本 0.6–1.4 度，在遊戲鏡頭下頭與肩完全看不出
+## 在動（`gait_probe` 待機那段量到頭位移不到半公分）——三尊雕像。放大到 2–3.6 度
+## 之後頭肩動 1.5 公分以上，才看得見有人在呼吸。三隻的比例（戰士深慢、法師淺、
+## 弓手淺快）維持不變。
 ## 角度單位是度，Vector3(X, Y, Z) 在「角色空間」下解讀：
 ##   X 正 = 抬頭／後仰    Y 正 = 向左轉    Z 正 = 向角色的右手邊倒
 ## 所以手臂往外張是左臂 Z 負、右臂 Z 正。這些是給人調的數字，不是規則——
@@ -66,7 +71,7 @@ const CHARACTERS := {
 			},
 		],
 		"pose": {
-			"breath_amplitude": 1.4,
+			"breath_amplitude": 3.6,
 			"breath_period": 4.0,
 			"sway_amplitude": 2.0,
 			"sway_period": 6.3,
@@ -97,7 +102,7 @@ const CHARACTERS := {
 			},
 		],
 		"pose": {
-			"breath_amplitude": 0.6,
+			"breath_amplitude": 2.0,
 			"breath_period": 4.6,
 			"sway_amplitude": 0.4,
 			"sway_period": 7.9,
@@ -133,7 +138,7 @@ const CHARACTERS := {
 			},
 		],
 		"pose": {
-			"breath_amplitude": 0.8,
+			"breath_amplitude": 2.4,
 			"breath_period": 2.6,
 			"sway_amplitude": 1.0,
 			"sway_period": 4.1,
