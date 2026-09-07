@@ -21,7 +21,11 @@ extends Node3D
 const CLIP_ALIASES := {
 	&"idle": ["idle", "stand", "breath"],
 	&"walk": ["walk"],
-	&"run": ["run", "sprint", "jog"],
+	# `run` 的關鍵字**不能包含 "sprint"**——`forged/sprint` 會被它撞到，
+	# 然後 `run` 解析到衝刺片段去。精確名稱優先，但關鍵字是後備路徑，
+	# 而後備路徑撞名的失敗是靜默的。
+	&"run": ["run", "jog"],
+	&"sprint": ["sprint", "dash_run"],
 	&"attack1": ["attack1", "attack"],
 	&"attack2": ["attack2"],
 	&"attack3": ["attack3"],
@@ -33,7 +37,7 @@ const CLIP_ALIASES := {
 	&"land": ["land", "landing"],
 }
 
-const LOCOMOTION: Array[StringName] = [&"idle", &"walk", &"run"]
+const LOCOMOTION: Array[StringName] = [&"idle", &"walk", &"run", &"sprint"]
 
 ## 切換動畫的交叉淡入時間。太短會有跳動，太長會拖。
 const BLEND_TIME := 0.15
@@ -42,22 +46,40 @@ const BLEND_TIME := 0.15
 ## 用 0.15 秒去混會把整個出手糊掉——玩家看到的是「動作還沒到就已經打中了」。
 const ACTION_BLEND_TIME := 0.04
 
-## 走路動畫「原本」對應的移動速度。用來讓播放速度跟著實際移動速度走，
-## 否則腳會在地上滑。調到腳不滑為止。
-const WALK_REFERENCE_SPEED := 1.6
-
-## 跑步片段「原本」對應的移動速度。
+## 走路片段對應多快的移動速度，在**量不到**的時候用這個。
 ##
-## 跑步是把走路的步幅外插放大 `RUN_STRIDE` 倍生出來的（見 motion_forge.gd），
-## 步幅大了 1.45 倍，同樣的地面速度就只需要 1/1.45 的步頻。這個數字**一定要
-## 從 RUN_STRIDE 算**，不能自己寫一個——兩邊分開寫的話，調了步幅而忘了這裡，
-## 腳就會開始滑，而且滑得很輕微、很難察覺是哪裡的問題。
-const RUN_REFERENCE_SPEED := WALK_REFERENCE_SPEED * MotionClips.RUN_STRIDE
+## 正常情況下這個數字來自名冊的 `walk_speed`（`gait_probe` 量出來的）。
+## 這裡留一個備援值只是為了讓名冊漏填時不會除以零。
+const FALLBACK_WALK_SPEED := 0.87
 
-## 超過這個速度就改播跑步。
-const RUN_SPEED := WALK_REFERENCE_SPEED * 1.6
+## 移動片段由慢到快。`stride` 是這一支的步幅相對走路的倍率——基準速度就是
+## `walk_speed × stride`，播放倍率再由實際速度除以它算出來。
+##
+## `from` 是換上這一支的速度門檻，單位是「走路基準速度的幾倍」。換句話說：
+## 上一支播到 `from` 倍就該換下一支了。**衝刺的步幅跟跑步一樣**——`RUN_STRIDE`
+## 已經頂到解剖學上限（見 motion_clips.gd），衝刺買的是姿勢不是步幅。
+const LOCOMOTION_BANDS := [
+	{"clip": &"walk", "stride": 1.0, "from": 0.0},
+	{"clip": &"run", "stride": MotionClips.RUN_STRIDE, "from": 1.7},
+	{"clip": &"sprint", "stride": MotionClips.RUN_STRIDE, "from": 3.6},
+]
 
-const SPEED_SCALE_RANGE := Vector2(0.6, 1.8)
+## 換檔的遲滯。降速要掉到門檻的這個比例以下才換回去，不然在門檻上會來回跳。
+const BAND_DROP := 0.85
+
+## 播放倍率的上下限。
+##
+## **上限 5.6 看起來很誇張，但它是算出來的，不是拍的。** `PlayerCharacter.SPEED`
+## 是 6.0 m/s，而衝刺的基準速度只有 `walk_speed × 1.45`——三隻分別是 1.27、
+## 1.09、1.33 m/s，需要的倍率是 4.74、5.50、4.52。取最大的那個再留一點餘裕。
+## 步幅已經頂到解剖學上限（見 motion_clips.gd 的 RUN_STRIDE），差額只能由
+## 步頻補：全速時大約一秒十步。
+##
+## 舊值是 1.8，那是這一輪之前腳會滑的**主因**：全速時動畫只跑到需要的三成多，
+## 其餘全部變成腳在地上滑（實測豬每步拖 96.5 公分）。上限存在的理由是防止
+## 數字爆掉，不是調畫面；覺得全速太碎步，要動的是 `SPEED` 或角色的腿長比例
+## ——腿只有身高的三分之一而要跑 6 m/s，碎步是算出來的結果，不是動畫的毛病。
+const SPEED_SCALE_RANGE := Vector2(0.6, 5.6)
 
 ## 低於這個速度算站著不動。
 const IDLE_SPEED := 0.15
@@ -84,6 +106,7 @@ var _player: AnimationPlayer = null
 var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
+var _foot_ik: FootIk = null
 var _ragdoll: PhysicalBoneSimulator3D = null
 var _recovery: RagdollRecovery = null
 var _action: StringName = &""
@@ -93,6 +116,15 @@ var _clips: Dictionary = {}
 
 ## 沒有 idle 動畫時，走路動畫要停在哪一秒。
 var _idle_hold := 0.0
+
+## 這一隻走路片段的自然速度（公尺／秒），載入時從名冊讀。
+var _walk_speed := FALLBACK_WALK_SPEED
+
+## 目前用的是 `LOCOMOTION_BANDS` 的第幾段。換檔遲滯要記住它。
+var _band := 0
+
+## 是否離地。鎖腳要看它——腳都不在地上了就沒有東西可以鎖。
+var _airborne := false
 
 ## 轉身傾斜要用的：上一幀的朝向，用來算角速度。
 var _last_yaw := 0.0
@@ -148,6 +180,7 @@ func load_character(id: StringName) -> bool:
 		_recovery = RagdollRecovery.new()
 		_recovery.name = "RagdollRecovery"
 		_skeleton.add_child(_recovery)
+	_attach_foot_ik()
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -166,6 +199,7 @@ func load_character(id: StringName) -> bool:
 		var clip := _clip(logical)
 		if clip != &"":
 			_player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+	_walk_speed = maxf(float(entry.get("walk_speed", FALLBACK_WALK_SPEED)), 0.01)
 	_idle_hold = _hold_time(float(entry.get("idle_hold", 0.0)))
 	_player.animation_finished.connect(_on_animation_finished)
 	return true
@@ -323,6 +357,17 @@ func _fix_cull_bounds(target_height: float) -> void:
 		mesh.extra_cull_margin = target_height * 4.0
 
 
+## 鎖腳層。**一定要掛在整個布娃娃區塊之後**，才會是修改器堆疊的最後一層：
+## 它要看到的是「動畫 + 程序化姿態 + 布娃娃回復」全部疊完的腳踝位置，
+## 不是中間某一層的。布娃娃建不起來時這裡照樣要掛，所以放在 if 外面。
+func _attach_foot_ik() -> void:
+	if _skeleton == null:
+		return
+	_foot_ik = FootIk.new()
+	_foot_ik.name = "FootIk"
+	_skeleton.add_child(_foot_ik)
+
+
 ## 找出模型裡的骨架。武器、程序化姿態、布娃娃、剔除修正全都要用到它，
 ## 所以獨立成一步，在載入流程的前段就做掉。
 func _find_skeleton() -> void:
@@ -443,6 +488,7 @@ func set_carrying(carrying: bool) -> void:
 
 
 func set_airborne(airborne: bool) -> void:
+	_airborne = airborne
 	if _pose != null:
 		_pose.set_airborne(airborne)
 
@@ -611,8 +657,9 @@ func clear_look_target() -> void:
 ## 依水平速度選待機或移動。單次動作播放中時不打斷它。
 func drive(speed: float) -> void:
 	if _pose != null:
-		_pose.set_motion(speed / WALK_REFERENCE_SPEED)
+		_pose.set_motion(speed / _walk_speed)
 	_moving = speed >= IDLE_SPEED
+	_drive_foot_ik()
 	if _player == null or _action != &"" or _freeze_timer > 0.0:
 		return
 
@@ -620,16 +667,17 @@ func drive(speed: float) -> void:
 		_stand()
 		return
 
-	# 播哪一支就用哪一支的基準速度算播放倍率。兩支的步幅不一樣，
+	# 播哪一支就用哪一支的基準速度算播放倍率。基準是「這支片段原本對應多快」，
 	# 共用一個基準的話跑起來腳一定滑。
-	var reference := WALK_REFERENCE_SPEED
 	var wanted := &""
-	if speed > RUN_SPEED:
-		wanted = _clip(&"run")
-		if wanted != &"":
-			reference = RUN_REFERENCE_SPEED
-	if wanted == &"":
-		wanted = _clip(&"walk")
+	while wanted == &"":
+		_band = _pick_band(speed)
+		wanted = _clip(LOCOMOTION_BANDS[_band]["clip"])
+		if wanted != &"" or _band == 0:
+			break
+		# 這一段的片段生不出來就退回上一段，不要靜靜地不動。
+		_band -= 1
+		wanted = _clip(LOCOMOTION_BANDS[_band]["clip"])
 	if wanted == &"":
 		return
 	_holding = false
@@ -638,8 +686,65 @@ func drive(speed: float) -> void:
 	elif not _player.is_playing():
 		_player.play(wanted)  # 從站姿的暫停狀態恢復
 	_player.speed_scale = clampf(
-		speed / reference, SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
+		speed / _reference_speed(_band), SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
 	)
+
+
+## 現在該不該鎖腳。
+##
+## 五個否決條件，每一個都有它的理由：
+##   離地      腳不在地上，沒有東西可以鎖
+##   一次性動作 攻擊／跳躍／受擊的腿是刻意擺的，鎖腳會把它拉回去
+##   頓幀      動畫停著，鎖腳會把停格的腳一路拖著走
+##   布娃娃    倒地時由物理說了算（TD-06）
+##   命中擠壓  `_write_punch()` 對這個節點寫**非等比**縮放，而鎖腳是在世界
+##             空間算的，被非等比縮放一扭目標點就跑掉了
+##
+## 站著不動也不鎖：身體沒動，腳本來就不會滑，鎖了只是多花力氣。
+func _drive_foot_ik() -> void:
+	if _foot_ik == null:
+		return
+	_foot_ik.set_locking(
+		_moving
+		and not _airborne
+		and _action == &""
+		and _freeze_timer <= 0.0
+		and _punch_elapsed >= CombatSpec.PUNCH_TIME
+		and (_ragdoll == null or not _ragdoll.active)
+	)
+
+
+## 這個速度該用第幾段。往上換用門檻本身，往下換要低於門檻乘 `BAND_DROP`
+## ——沒有遲滯的話，速度剛好卡在門檻上時會每一幀換一支，混合永遠重啟。
+func _pick_band(speed: float) -> int:
+	var band := 0
+	for index in LOCOMOTION_BANDS.size():
+		var edge := _walk_speed * float(LOCOMOTION_BANDS[index]["from"])
+		if index <= _band:
+			edge *= BAND_DROP  # 已經在這一段（或更高）就用比較低的門檻留住它
+		if index == 0 or speed >= edge:
+			band = index
+	return band
+
+
+## 第 n 段的基準速度：這支片段原本對應多快的移動速度。
+func _reference_speed(band: int) -> float:
+	return _walk_speed * float(LOCOMOTION_BANDS[band]["stride"])
+
+
+## 一步走多遠（公尺）。腳步聲用它，這樣聲音會踩在動畫真正的落腳上。
+##
+## 推導：不滑的條件是「地面速度 = 自然速度 × 步幅倍率 × 播放倍率」，而步頻是
+## 「每秒循環數 × 2」＝「播放倍率 ÷ 片段長度 × 2」。兩者相除，播放倍率剛好
+## 消掉——**一步的距離跟跑多快無關，只跟片段與步幅有關**。
+##
+## 這取代了 `PlayerCharacter` 原本的 `身高 × 0.62`。那個數字是另外猜的，
+## 跟動畫用的基準速度對不上，所以腳步聲從來沒踩在落腳上（實測差了兩倍多）。
+func step_length() -> float:
+	var clip := _clip(&"walk")
+	if _player == null or clip == &"":
+		return _walk_speed * 0.5
+	return _reference_speed(_band) * _player.get_animation(clip).length * 0.5
 
 
 ## 站著不動。有 idle 就播 idle；沒有就把走路停在一幀，剩下的交給 ProceduralPose。

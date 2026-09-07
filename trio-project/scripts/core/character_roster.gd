@@ -20,6 +20,21 @@ extends RefCounted
 ## 不會退回雙手平舉的 T 字站在那裡。留著的成本是一行，拿掉的代價是
 ## 「生成一壞掉，畫面上就是三尊 T 字雕像」。
 ##
+## walk_speed 是**量出來的**：這支走路片段原本對應多快的移動速度（公尺／秒）。
+##
+## 量法與重新量的方式：
+##
+##     godot --headless --path trio-project res://scenes/tools/gait_probe.tscn
+##
+## 站立期的腳不該滑，所以「腳相對身體往後退多快」就等於「身體該以多快前進」。
+## 探針逐格取兩隻腳之中往後退得最快的那一個，再取整個循環的中位數——
+## 那個分佈是一段很乾淨的平台（p25 0.81、p50 0.87、p75 0.92），不是雜訊。
+##
+## **這一欄取代了三個各自為政的猜測**：`CharacterVisual` 的 1.6、
+## `PlayerCharacter` 用身高 × 0.62 反推的步幅、以及播放倍率的上限。
+## 舊的 1.6 幾乎是實際值的兩倍，所以動畫一直播得太慢，腳一直在滑。
+## 三隻差不多是應該的——同一份來源動畫重定向到三副骨架，差的只有比例。
+##
 ## weapons 是這隻手上拿的東西（scripts/player/weapon_rack.gd）。
 ##   kind  劍／弓／法杖，零件表寫在 WeaponRack
 ##   bone  掛在哪根手骨
@@ -39,6 +54,7 @@ const CHARACTERS := {
 	# 豬戰士：體格撐開、微前傾、呼吸幅度大而慢。站在那裡就該像一堵牆。
 	&"pig_warrior": {
 		"model": "res://assets/characters/pig_warrior.glb",
+		"walk_speed": 0.873,
 		"weight": WeightLadder.PIG,
 		"height": 1.6,
 		"yaw_offset": 180.0,
@@ -69,6 +85,7 @@ const CHARACTERS := {
 	# 蛙法師：挺胸、兩手收在身前、幾乎不擺動。安靜是他的辨識度。
 	&"frog_mage": {
 		"model": "res://assets/characters/frog_mage.glb",
+		"walk_speed": 0.752,
 		"weight": WeightLadder.FROG,
 		"height": 1.4,
 		"yaw_offset": 180.0,
@@ -104,6 +121,7 @@ const CHARACTERS := {
 	# 貓弓手：側身站、一手抬到腰前像搭著箭、呼吸淺而快、轉頭最快。
 	&"cat_archer": {
 		"model": "res://assets/characters/cat_archer.glb",
+		"walk_speed": 0.915,
 		"weight": WeightLadder.CAT,
 		"height": 1.7,
 		"yaw_offset": 180.0,

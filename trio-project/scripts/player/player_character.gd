@@ -74,9 +74,6 @@ const FALL_DAMAGE_PER_SPEED := 9.0
 ## 起跳時身體拉長的量（與命中縮放共用同一個通道，正數＝拉長）。
 const JUMP_STRETCH := 0.10
 
-## 腳步的步幅＝身高 × 這個比例。矮的動物步伐短，節奏才對得上。
-const STRIDE_RATIO := 0.62
-
 ## 慢到這個速度以下就不出腳步聲——輕微的推擠或滑動不該一直踩。
 const STEP_MIN_SPEED := 1.2
 
@@ -686,7 +683,12 @@ func _tick_footsteps(delta: float, grounded: bool) -> void:
 	if speed < STEP_MIN_SPEED:
 		return
 	_step_distance += speed * delta
-	var stride := character_height * STRIDE_RATIO
+	# 步幅跟動畫要來，不要自己另外算一個。
+	#
+	# 舊版是 `身高 × 0.62`，那是**跟動畫完全無關的第二個猜測**。實測豬的
+	# 走路一步是 0.45 公尺，舊值算出來是 0.99——腳步聲以不到一半的頻率在響，
+	# 從來沒有踩在動畫的落腳上。現在兩邊同一個來源，聲音自然對得上。
+	var stride := _character.step_length()
 	if _step_distance < stride:
 		return
 	_step_distance -= stride

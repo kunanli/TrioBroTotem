@@ -76,7 +76,7 @@ func _check_animations() -> void:
 		_expect(missing.is_empty(), "%s 解析不到這幾支動畫：%s" % [id, ", ".join(missing)])
 
 		var not_forged: Array[String] = []
-		for key in [&"idle", &"run"]:
+		for key in [&"idle", &"run", &"sprint"]:
 			if not String(visual.clip_for(key)).begins_with("%s/" % MotionForge.LIBRARY_NAME):
 				not_forged.append("%s -> %s" % [key, visual.clip_for(key)])
 		_expect(

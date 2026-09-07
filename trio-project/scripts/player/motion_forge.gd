@@ -46,6 +46,26 @@ const NON_COMBAT := {
 	},
 }
 
+## 從走路改出來的移動片段。步幅倍率、手臂擺動倍率、疊上去的固定姿勢。
+##
+## 兩支的**步幅一樣**：`RUN_STRIDE` 已經頂到解剖學上限（見 MotionClips 的說明），
+## 衝刺買的是姿勢不是步幅。全速那一段靠步頻。
+const GAITS := [
+	{
+		"clip": &"run",
+		"stride": MotionClips.RUN_STRIDE,
+		"arm_swing": MotionClips.RUN_ARM_SWING,
+		"lean": MotionClips.RUN_LEAN,
+	},
+	{
+		"clip": &"sprint",
+		"stride": MotionClips.RUN_STRIDE,
+		"arm_swing": MotionClips.SPRINT_ARM_SWING,
+		"lean": MotionClips.SPRINT_LEAN,
+	},
+]
+
+
 ## 待機片段的長度。內容是靜態的（呼吸與擺動由 ProceduralPose 疊），
 ## 所以這個數字只決定「首尾兩格隔多遠」，多長都一樣——但不能是 0，
 ## `_forge()` 會把長度 0 的片段當成沒東西丟掉。
@@ -84,10 +104,14 @@ static func attach(player: AnimationPlayer, skeleton: Skeleton3D, space: Node3D,
 	if idle != null:
 		library.add_animation(&"idle", idle)
 		built += 1
-	var run := _forge_run(_imported_walk(player), skeleton, space)
-	if run != null:
-		library.add_animation(&"run", run)
-		built += 1
+	# 跑步與衝刺都是從匯入的走路改出來的，只是外插的倍率與疊上去的姿勢不同。
+	var walk := _imported_walk(player)
+	for recipe in GAITS:
+		var gait: Dictionary = recipe
+		var made := _forge_gait(walk, skeleton, space, gait)
+		if made != null:
+			library.add_animation(gait["clip"], made)
+			built += 1
 
 	if built > 0:
 		if player.has_animation_library(LIBRARY_NAME):
@@ -122,7 +146,7 @@ static func _imported_walk(player: AnimationPlayer) -> Animation:
 	return null
 
 
-## 跑步：把走路循環的每一格繞著它自己的平均姿勢外插放大，再疊一個固定的前傾。
+## 跑步／衝刺：把走路循環的每一格繞著它自己的平均姿勢外插放大，再疊固定姿勢。
 ##
 ## 為什麼不手刻：走路是這三份 GLB 唯一帶進來的動畫，而它有真正的落腳時機。
 ## 外插的作法把那個節奏原封不動保留下來，只是把步幅與擺手放大——手刻一支
@@ -137,11 +161,13 @@ static func _imported_walk(player: AnimationPlayer) -> Animation:
 ##
 ## 數學：每一格是 `q`，這條軌的平均是 `mean`，放大後是 `mean.slerp(q, 1.45)`
 ## ——slerp 的參數超過 1 就是外插，方向不變、轉得更多。最後再乘上前傾。
-static func _forge_run(walk: Animation, skeleton: Skeleton3D, space: Node3D) -> Animation:
+static func _forge_gait(
+	walk: Animation, skeleton: Skeleton3D, space: Node3D, recipe: Dictionary
+) -> Animation:
 	if walk == null or skeleton == null:
 		return null
 	var run: Animation = walk.duplicate(true)
-	var lean: Dictionary = MotionClips.RUN_LEAN
+	var lean: Dictionary = recipe["lean"]
 	var frames := BoneSpace.frames(skeleton, space, lean.keys())
 	var touched := 0
 	for track in run.get_track_count():
@@ -151,9 +177,9 @@ static func _forge_run(walk: Animation, skeleton: Skeleton3D, space: Node3D) -> 
 		var index := skeleton.find_bone(String(bone))
 		if index < 0:
 			continue
-		var stretch := MotionClips.RUN_STRIDE
+		var stretch := float(recipe["stride"])
 		if MotionClips.ARM_BONES.has(bone):
-			stretch = MotionClips.RUN_ARM_SWING
+			stretch = float(recipe["arm_swing"])
 		var mean := _mean_rotation(run, track)
 		# 前傾是左乘上去的角色空間旋轉，跟 `_forge()` 寫關鍵影格時同一個約定。
 		# 這裡不必再乘 rest——`mean.slerp(value, ...)` 本來就已經是含靜置的完整姿勢。
@@ -169,7 +195,7 @@ static func _forge_run(walk: Animation, skeleton: Skeleton3D, space: Node3D) -> 
 	if touched == 0:
 		# 走路片段被匯入流程壓縮過就會走到這裡（壓縮軌讀不到關鍵影格）。
 		# 靜靜地回傳一支跟走路一模一樣的東西比較糟——那正是這一輪在修的病。
-		push_warning("[Forge] 走路片段裡沒有讀得到的旋轉軌，跑步生不出來")
+		push_warning("[Forge] 走路片段裡沒有讀得到的旋轉軌，%s 生不出來" % recipe["clip"])
 		return null
 	run.loop_mode = Animation.LOOP_LINEAR
 	return run

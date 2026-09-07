@@ -41,7 +41,8 @@ SCENE = "res://scenes/tools/animation_lab.tscn"
 
 ## 整輪輪播的長度（scripts/tools/animation_lab.gd 的 PLAYLIST 加起來）。
 ## 這裡多留一點，寧可多拍幾幀也不要在最後一支動作播到一半就停。
-DEFAULT_SECONDS = 21.0
+## 加了 SPRINT 那一段之後整輪變長了，這個數字要跟著 PLAYLIST 走。
+DEFAULT_SECONDS = 24.0
 DEFAULT_FPS = 15
 
 ## 聯絡表的格子數。4×4 剛好夠涵蓋一整輪的十三段。

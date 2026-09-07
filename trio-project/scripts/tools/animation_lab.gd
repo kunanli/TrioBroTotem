@@ -27,6 +27,22 @@ const SPACING := 1.85
 ## 0.5 弧度（約 29 度）是往右手邊轉——劍與法杖都在右手。
 const FACE_TURN := 0.5
 
+## 走路那幾段的朝向：面向 +X，也就是橫著走過畫面。
+##
+## 側面是**判斷腳滑最好的角度**——正面看不出腳往後拖了幾公分，側面一眼就
+## 看得到腳有沒有黏在地上。
+const WALK_FACING := -PI * 0.5
+
+## 走起來之後怎麼繞回來。
+##
+## 三隻排成一列、間距 SPACING，把每一隻的 x 折回寬度 `3 × SPACING` 的區間裡，
+## **三個位置永遠還是那三個**——只是誰站哪一格會輪替。所以畫面上完全看不出
+## 有繞回這件事，不會有「跳一下」。這是能無縫循環又不用移動鏡頭的作法。
+const WRAP_WIDTH := SPACING * 3.0
+
+## 轉向的時間常數。走路段要轉去面向 +X，其餘段轉回 3/4 側面。
+const FACING_TIME := 0.25
+
 ## 開拍前先空轉幾幀。第一幀通常是黑的（shader 還在編、陰影 atlas 還沒建），
 ## 而且 GIF 的第一格會被當成縮圖。
 const WARMUP_FRAMES := 16
@@ -59,8 +75,11 @@ const LOOK_AT_Y := 0.95
 ## 然後才是動作。攻擊排在中間、受擊與倒下排最後——倒下之後要留時間站起來。
 const PLAYLIST := [
 	{"label": "IDLE", "drive": 0.0, "seconds": 2.6},
-	{"label": "WALK", "drive": 1.6, "seconds": 2.4},
-	{"label": "RUN", "drive": 3.6, "seconds": 2.4},
+	# `travel` ＝ 真的往前走。**沒有它就看不出這一輪做了什麼**：鎖腳是把腳釘在
+	# 世界座標上，身體不動的話等於原地立正，畫面上什麼都看不到。
+	{"label": "WALK", "drive": 1.4, "travel": 1.4, "seconds": 3.0},
+	{"label": "RUN", "drive": 3.0, "travel": 3.0, "seconds": 3.0},
+	{"label": "SPRINT", "drive": 6.0, "travel": 6.0, "seconds": 3.0},
 	# 轉身傾斜是疊加層不是片段（見 MotionClips.PIVOT_POSE），所以驗它的方法是
 	# **把角色轉起來**。2.2 秒剛好整整一圈，結束時朝向回到原位，不必硬扳回去。
 	{"label": "TURN", "drive": 1.6, "spin": TAU / 2.2, "seconds": 2.2},
@@ -83,6 +102,8 @@ var _step := 0.0
 var _index := 0
 var _speed := 0.0
 var _spin := 0.0
+var _travel := 0.0
+var _phase := 0.0
 var _running := false
 var _orbit := true
 
@@ -164,10 +185,11 @@ func _build_cast() -> void:
 			push_warning("[Lab] %s 載入失敗" % id)
 			continue
 		_visuals.append(visual)
-		add_child(_nameplate(id, visual.position))
+		# 名牌掛在角色底下，走起來才跟著走。掛在原點的話人走了字留在原地。
+		visual.add_child(_nameplate(id))
 
 
-func _nameplate(id: StringName, at: Vector3) -> Label3D:
+func _nameplate(id: StringName) -> Label3D:
 	var plate := Label3D.new()
 	plate.text = String(id).replace("_", " ").to_upper()
 	plate.font_size = 96
@@ -178,7 +200,7 @@ func _nameplate(id: StringName, at: Vector3) -> Label3D:
 	plate.modulate = Color(0.96, 0.94, 0.88)
 	plate.outline_size = 24
 	plate.outline_modulate = Color(0.05, 0.04, 0.06)
-	plate.position = at + Vector3(0.0, 2.35, 0.0)
+	plate.position = Vector3(0.0, 2.35, 0.0)
 	return plate
 
 
@@ -206,8 +228,19 @@ func _process(delta: float) -> void:
 	_clock += delta
 	_step += delta
 	_aim(_clock)
-	for visual in _visuals:
-		visual.rotation.y += _spin * delta
+	_phase = fmod(_phase + _travel * delta, WRAP_WIDTH)
+	var facing := WALK_FACING if _travel > 0.0 else PI + FACE_TURN
+	for index in _visuals.size():
+		var visual: CharacterVisual = _visuals[index]
+		if _spin != 0.0:
+			visual.rotation.y += _spin * delta
+		else:
+			visual.rotation.y = lerp_angle(
+				visual.rotation.y, facing, 1.0 - exp(-delta / FACING_TIME)
+			)
+		visual.position.x = wrapf(
+			(index - 1) * SPACING + _phase, -WRAP_WIDTH * 0.5, WRAP_WIDTH * 0.5
+		)
 		visual.drive(_speed)
 	var entry: Dictionary = PLAYLIST[_index]
 	if _step >= float(entry["seconds"]):
@@ -225,6 +258,7 @@ func _enter(index: int) -> void:
 	var entry: Dictionary = PLAYLIST[index]
 	_speed = float(entry.get("drive", 0.0))
 	_spin = float(entry.get("spin", 0.0))
+	_travel = float(entry.get("travel", 0.0))
 	_title.text = String(entry["label"])
 	var carrying := bool(entry.get("carry", false))
 	for visual in _visuals:
