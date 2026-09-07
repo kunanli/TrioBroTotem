@@ -93,7 +93,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"staff", "bone": &"RightHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(60.0, 0.0, 48.0),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(-34.0, 0.0, 31.0),
 			},
 		],
 		"pose": {

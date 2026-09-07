@@ -73,9 +73,29 @@ const BOW := [
 		"spin": Vector3(-34.0, 0, 0), "color": &"wood_light"},
 	{"shape": &"box", "size": Vector3(0.046, 0.200, 0.052), "at": Vector3(0, -0.432, -0.108),
 		"spin": Vector3(34.0, 0, 0), "color": &"wood_light"},
-	{"shape": &"box", "size": Vector3(0.017, 1.030, 0.017), "at": Vector3(0, 0, -0.164),
-		"color": &"path_edge"},
+	# 弦是**兩段**，不是一根：拉弓的時候中間那個搭箭點要跟著右手往後走。
+	# 一根固定的長方體看起來就是「射箭時弦完全不動」——那是弓手最露餡的一格。
+	# 兩段的端點與長度由 `bow_string.gd` 每幀算，這裡寫的只是初始尺寸。
+	{"shape": &"box", "size": Vector3(0.017, 0.515, 0.017), "at": Vector3(0, 0.258, -0.164),
+		"color": &"path_edge", "part": &"string_upper"},
+	{"shape": &"box", "size": Vector3(0.017, 0.515, 0.017), "at": Vector3(0, -0.258, -0.164),
+		"color": &"path_edge", "part": &"string_lower"},
 ]
+
+## 弓弦兩端固定在哪、以及靜止時搭箭點在哪（武器自己的座標）。
+##
+## 上下梢的位置與 `BOW` 最後兩段弓臂的外端一致——改了那兩段的角度或長度，
+## 這裡要跟著改，不然弦會接在半空中。
+const BOW_NOCKS := {
+	"upper": Vector3(0.0, 0.515, -0.164),
+	"lower": Vector3(0.0, -0.515, -0.164),
+	"rest": Vector3(0.0, 0.0, -0.164),
+}
+
+## 弓弦最多被拉開多遠（武器自己的座標，往 −Z 也就是靠身體那一側）。
+##
+## 0.34 大約是弓高的三分之一——再多，弓臂就該跟著彎了，而弓臂是硬的方塊。
+const BOW_DRAW := 0.34
 
 ## 法杖：長桿 + 頂端的球。球用 `goal`——配色表裡唯一有自發光的暖色，
 ## 而且 `default_env.tres` 的 glow 門檻是 1.1，這顆會真的在畫面上暈開。
@@ -88,6 +108,22 @@ const STAFF := [
 ]
 
 const SHAPES := {&"sword": SWORD, &"bow": BOW, &"staff": STAFF}
+
+## 副手該握在武器的哪一點（武器自己的座標，+Y 指向尖端）。
+##
+## **放在這裡而不是名冊裡**：這是武器的幾何性質，不是角色的偏好。零件表改了
+## 位置，握點就該跟著改——兩個數字放在同一個檔案才不會各走各的。而「哪一隻
+## 角色要用副手」也不必另外開一個欄位：**這張表裡有沒有這把武器就是答案**。
+##
+##   staff  杖身往上 0.20。雙手握杖的常見位置，而且還在手臂搆得到的範圍內。
+##   bow    弦的正中央（z 與 BOW 那條弦一致）——搭箭的地方。
+##
+## 劍不在表上，所以豬維持單手。劍柄只有 0.19 長，副手只能貼在劍首上，太擠；
+## 而且這樣「有副手」與「沒有副手」兩條路都會被真的走過。
+const OFF_GRIPS := {
+	&"staff": Vector3(0.0, 0.13, 0.0),
+	&"bow": Vector3(0.0, 0.0, -0.164),
+}
 
 
 ## 把名冊裡寫的武器全部掛上去，回傳掛成功幾把。
@@ -124,25 +160,100 @@ static func _grip_node(kind: StringName, bone_name: String, grip: Dictionary,
 	socket.name = "%sSocket" % String(kind).capitalize()
 	socket.bone_name = bone_name
 
+	# 武器種類記在掛點上。手部 IK 與 hand_probe 都要知道這掛的是哪一把，
+	# 而從節點名稱反推（"BowSocket" -> "bow"）會在有人改名字的那天靜靜地壞掉。
+	socket.set_meta(&"weapon_kind", kind)
+
 	var root := Node3D.new()
 	root.name = String(kind).capitalize()
-	var spin: Vector3 = GRIP_SPIN + grip.get("spin", Vector3.ZERO)
-	root.transform = Transform3D(
-		Basis.from_euler(
-			Vector3(deg_to_rad(spin.x), deg_to_rad(spin.y), deg_to_rad(spin.z))
-		),
-		(grip.get("at", Vector3.ZERO) as Vector3) * ratio
-	)
-	root.scale = Vector3.ONE * ratio
+	root.transform = grip_transform(grip, ratio)
 	socket.add_child(root)
 
 	for item in SHAPES[kind]:
 		root.add_child(_part(item))
+	if kind == &"bow":
+		var string := BowString.new()
+		string.name = "BowString"
+		root.add_child(string)
 	return socket
+
+
+## 一把武器在**手骨局部座標**下的擺放。
+##
+## 掛節點、`hand_probe`、`hand_ik` 共用這一份——三邊各自把 `GRIP_SPIN + spin`
+## 推一次的話，遲早有一邊會跟另外兩邊對不上，而那種錯只會表現成「武器有點歪」。
+static func grip_transform(grip: Dictionary, ratio: float) -> Transform3D:
+	var spin: Vector3 = GRIP_SPIN + (grip.get("spin", Vector3.ZERO) as Vector3)
+	var basis := Basis.from_euler(
+		Vector3(deg_to_rad(spin.x), deg_to_rad(spin.y), deg_to_rad(spin.z))
+	)
+	return Transform3D(
+		basis.scaled(Vector3.ONE * ratio), (grip.get("at", Vector3.ZERO) as Vector3) * ratio
+	)
+
+
+## 武器最遠端在自己座標下的位置。**從零件表算出來**，不要另外寫死一個數字——
+## 這是 `hand_probe` 的成績單量的那一點，寫死的話改了零件表成績就不再可比。
+static func tip(kind: StringName) -> Vector3:
+	var far := 0.0
+	for item in SHAPES.get(kind, []):
+		far = maxf(far, _top(item))
+	return Vector3(0.0, far, 0.0)
+
+
+## 掛在這副骨架上的武器：[{"socket": …, "root": …, "kind": …, "bone": …}]。
+##
+## 讀真正掛上去的節點，不重算一次擺放——`root.transform` 就是 `grip_transform()`
+## 的結果，連骨架高度的比例都已經在裡面了。
+static func mounted(skeleton: Skeleton3D) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if skeleton == null:
+		return out
+	for node in skeleton.find_children("*Socket", "BoneAttachment3D", true, false):
+		var socket: BoneAttachment3D = node
+		if socket.get_child_count() == 0 or not socket.has_meta(&"weapon_kind"):
+			continue
+		out.append({
+			"socket": socket,
+			"root": socket.get_child(0) as Node3D,
+			"kind": socket.get_meta(&"weapon_kind") as StringName,
+			"bone": skeleton.find_bone(socket.bone_name),
+		})
+	return out
+
+
+## 一個零件在 +Y 方向上伸到多遠（含它自己的 spin）。
+static func _top(spec: Dictionary) -> float:
+	var at: Vector3 = spec.get("at", Vector3.ZERO)
+	if StringName(spec["shape"]) == &"sphere":
+		return at.y + float(spec["size"])
+	var spin: Vector3 = spec.get("spin", Vector3.ZERO)
+	var basis := Basis.from_euler(
+		Vector3(deg_to_rad(spin.x), deg_to_rad(spin.y), deg_to_rad(spin.z))
+	)
+	var half := (spec["size"] as Vector3) * 0.5
+	var far := -INF
+	for corner in 8:
+		far = maxf(
+			far,
+			(
+				basis
+				* Vector3(
+					half.x if (corner & 1) != 0 else -half.x,
+					half.y if (corner & 2) != 0 else -half.y,
+					half.z if (corner & 4) != 0 else -half.z
+				)
+			).y
+		)
+	return at.y + far
 
 
 static func _part(spec: Dictionary) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
+	# 有名字的零件要叫得出來（弓弦那兩段）。用節點名稱而不是索引：
+	# 零件表中間插一個東西，索引就全錯了，而那種錯是靜默的。
+	if spec.has("part"):
+		node.name = String(spec["part"])
 	node.mesh = _mesh(spec)
 	# 用 surface override 而不是 material_override：CharacterVisual._cache_materials()
 	# 是逐 surface 在複製材質、掛描邊（TD-09 的 inverted hull）、以及登記命中白閃的。

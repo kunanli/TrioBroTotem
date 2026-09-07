@@ -107,6 +107,7 @@ var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _pose: ProceduralPose = null
 var _foot_ik: FootIk = null
+var _hand_ik: HandIk = null
 var _ragdoll: PhysicalBoneSimulator3D = null
 var _recovery: RagdollRecovery = null
 var _action: StringName = &""
@@ -125,6 +126,10 @@ var _band := 0
 
 ## 是否離地。鎖腳要看它——腳都不在地上了就沒有東西可以鎖。
 var _airborne := false
+
+## 是否扛著東西。手部 IK 要看它：`CARRY_POSE` 把雙手抬到身前，那時候把持械手
+## 拉回武器該在的位置會跟它打架，兩層互相拉扯的結果是手在抖。
+var _carrying := false
 
 ## 轉身傾斜要用的：上一幀的朝向，用來算角速度。
 var _last_yaw := 0.0
@@ -181,6 +186,7 @@ func load_character(id: StringName) -> bool:
 		_recovery.name = "RagdollRecovery"
 		_skeleton.add_child(_recovery)
 	_attach_foot_ik()
+	_attach_hand_ik()
 
 	_player = _model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if _player == null:
@@ -368,6 +374,24 @@ func _attach_foot_ik() -> void:
 	_skeleton.add_child(_foot_ik)
 
 
+## 手部 IK。掛在鎖腳之後——兩層碰的骨頭不重疊（腿／手臂），順序不影響結果，
+## 但排在最後讓「最後一層看得到前面全部」這條規則對整個堆疊都成立。
+##
+## **一定要在 `WeaponRack.attach()` 之後**：這一層是從掛上去的武器節點反推
+## 握點與尖端的（`WeaponRack.mounted()`），沒有武器它就把自己關掉。
+func _attach_hand_ik() -> void:
+	if _skeleton == null:
+		return
+	_hand_ik = HandIk.new()
+	_hand_ik.name = "HandIk"
+	_hand_ik.configure(self)
+	_skeleton.add_child(_hand_ik)
+	# 弓弦要跟著解出來的那隻手走。**只有這一層知道那個位置**——從修改器堆疊
+	# 外面讀骨頭讀到的是還原後的動畫姿勢，弦會接在手還沒到的地方。
+	for node in _skeleton.find_children("BowString", "Node3D", true, false):
+		(node as BowString).bind(_hand_ik)
+
+
 ## 找出模型裡的骨架。武器、程序化姿態、布娃娃、剔除修正全都要用到它，
 ## 所以獨立成一步，在載入流程的前段就做掉。
 func _find_skeleton() -> void:
@@ -483,6 +507,7 @@ func freeze(seconds: float) -> void:
 ## 扛著東西與離地的疊加姿勢。轉給 ProceduralPose——那一層才是加法的，
 ## 而這兩個狀態都必須與走路共存（腿照常走），不能走 play_action。
 func set_carrying(carrying: bool) -> void:
+	_carrying = carrying
 	if _pose != null:
 		_pose.set_carrying(carrying)
 
@@ -660,6 +685,7 @@ func drive(speed: float) -> void:
 		_pose.set_motion(speed / _walk_speed)
 	_moving = speed >= IDLE_SPEED
 	_drive_foot_ik()
+	_drive_hand_ik()
 	if _player == null or _action != &"" or _freeze_timer > 0.0:
 		return
 
@@ -707,6 +733,30 @@ func _drive_foot_ik() -> void:
 	_foot_ik.set_locking(
 		_moving
 		and not _airborne
+		and _action == &""
+		and _freeze_timer <= 0.0
+		and _punch_elapsed >= CombatSpec.PUNCH_TIME
+		and (_ragdoll == null or not _ragdoll.active)
+	)
+
+
+## 現在該不該穩定持械手、接上副手。
+##
+## 前四個否決條件與鎖腳同一組（見上），另外兩個是手才有的：
+##   扛東西    `CARRY_POSE` 把雙手抬到身前，拉回武器位置會跟它打架
+##   離地      滯空的手臂是 `AIRBORNE_POSE` 擺的，同上
+##
+## **與鎖腳最大的差別是「站著不動」不否決。** 站著的時候腳本來就不滑，鎖了白鎖；
+## 但手要在站著的時候把副手接到法杖／弓弦上，那正是最看得到的一格。
+##
+## 一次性動作那一條是這一層最貴的：**攻擊正是武器該甩的時候**，沒淡乾淨等於
+## 把出手的力道整個抹平，而靜態檢查抓不到，只有 `shoot_anim` 看得出來。
+func _drive_hand_ik() -> void:
+	if _hand_ik == null:
+		return
+	_hand_ik.set_steadying(
+		not _airborne
+		and not _carrying
 		and _action == &""
 		and _freeze_timer <= 0.0
 		and _punch_elapsed >= CombatSpec.PUNCH_TIME

@@ -17,6 +17,12 @@ const PROBE_PORT := 45999
 ## 一秒有幾個物理幀（project.godot：physics_ticks_per_second=120）。
 const SECOND := 120
 
+## 副手離武器握點的上限，單位是臂長的比例（約 5 公分）。
+const OFF_HAND_LIMIT := 0.10
+
+## 驗副手之前先空推幾幀，讓待機播起來、IK 淡入、姿態層收斂。
+const OFF_HAND_FRAMES := 60
+
 ## 驗 AI 時把不相干的角色搬到哪裡去。
 const PARK_X := 200.0
 
@@ -25,6 +31,27 @@ const LOG_SPOT := Vector3(0.0, 0.45, 20.0)
 
 ## gdlint 的 duplicated-load：同一個場景 load 兩次要收成一個常數。
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
+
+## 掛在修改器堆疊最後面，記下副手與持械手的最終姿勢。
+##
+## 引擎跑完堆疊會還原骨頭姿勢，從外面讀 `get_bone_global_pose()` 讀到的只有
+## 動畫寫的那一份——`HandIk` 的結果看不到。不這樣做的話這條規則會在**手部 IK
+## 完全沒生效的情況下照樣通過**，而那正是它要抓的東西。
+class OffHandSampler:
+	extends SkeletonModifier3D
+
+	var hand := -1
+	var weapon := -1
+	var seen := Vector3.ZERO
+	var weapon_pose := Transform3D.IDENTITY
+
+	func _process_modification() -> void:
+		var skeleton := get_skeleton()
+		if skeleton == null or hand < 0 or weapon < 0:
+			return
+		seen = skeleton.get_bone_global_pose(hand).origin
+		weapon_pose = skeleton.get_bone_global_pose(weapon)
+
 
 var _failures: Array[String] = []
 
@@ -90,6 +117,8 @@ func _check_animations() -> void:
 			sockets.size() == wanted,
 			"%s 名冊寫了 %d 把武器，實際掛上去 %d 把" % [id, wanted, sockets.size()]
 		)
+
+		await _check_off_hand(visual)
 		# queue_free 不是 free：這底下有 Ragdoll 建出來的 PhysicalBone3D，
 		# 當場拆掉物理節點會讓 Jolt 抱怨。反正它們不在任何群組裡，
 		# 多活一幀不會干擾後面的檢查。
@@ -98,6 +127,70 @@ func _check_animations() -> void:
 	# 不等的話這三隻會多活幾幀、`_process` 照跑，跟後面的檢查混在同一個場上——
 	# 這支探針被「場上剛好有別的東西」騙過不只一次了（見 `_clear_stage()`）。
 	await get_tree().process_frame
+
+
+## 雙手武器的副手要真的握在武器上。
+##
+## 為什麼這條值得一驗：**它壞掉的樣子跟正常的完全一樣**——角色照樣站著、照樣
+## 走路、武器照樣在手上，只是空著的那隻手在武器旁邊十幾公分的地方比劃。
+## 那個距離在遊戲鏡頭下幾乎看不出來，而它可以被四種完全不相干的改動弄壞：
+## 動了 `MotionClips.IDLE` 的手臂角度、動了 `weapon_aim.TARGETS`、動了
+## `WeaponRack` 的零件表、或是 `HandIk` 那一層根本沒掛上去。
+##
+## 門檻是**臂長的比例**不是公分：三隻的手臂 0.52–0.57 公尺，寫死公分數的話
+## 換一隻身高不同的角色就會誤判。0.10 倍臂長大約是 5 公分。
+##
+## 要看實際數字（哪一支片段差多少）跑 `hand_probe`；這裡只負責在它壞掉時喊。
+##
+## **它有一個盲點，而且是故意的**：把 `WeaponRack.OFF_GRIPS` 裡那一筆刪掉的話，
+## 這條規則會安靜地跳過去（劍就是這樣，豬本來就單手）。那是設計改動不是 bug，
+## 分不出來——所以「這把武器要不要雙手握」這件事沒有被驗到，只有「宣告了要
+## 雙手握就得真的握上」有。
+func _check_off_hand(visual: CharacterVisual) -> void:
+	var found := visual.find_children("*", "Skeleton3D", true, false)
+	if found.is_empty():
+		return
+	var skeleton: Skeleton3D = found[0]
+	var weapons := WeaponRack.mounted(skeleton)
+	if weapons.is_empty():
+		return
+	var weapon: Dictionary = weapons[0]
+	var kind: StringName = weapon["kind"]
+	if not WeaponRack.OFF_GRIPS.has(kind):
+		return  # 單手武器，副手本來就空著
+	var hand := int(weapon["bone"])
+	var free := "Left" if skeleton.get_bone_name(hand).begins_with("Right") else "Right"
+	var chain := LimbIk.find_chain(
+		skeleton, ["%sShoulder" % free, "%sUpperArm" % free, "%sLowerArm" % free]
+	)
+	var off := skeleton.find_bone("%sHand" % free)
+	if chain.is_empty() or off < 0:
+		_expect(false, "%s 的骨架上找不到副手那條手臂" % visual.character_id)
+		return
+
+	# 讓待機播起來、IK 淡入、姿態層的阻尼收斂。**從外面讀不到修改器的結果**，
+	# 所以取樣自己也要當一層掛在最後面（與 hand_probe 同一個理由）。
+	var sampler := OffHandSampler.new()
+	sampler.hand = off
+	sampler.weapon = hand
+	skeleton.add_child(sampler)
+	for _frame in OFF_HAND_FRAMES:
+		visual.drive(0.0)
+		await get_tree().process_frame
+
+	var mount: Transform3D = (weapon["root"] as Node3D).transform
+	var grip: Vector3 = sampler.weapon_pose * (mount * (WeaponRack.OFF_GRIPS[kind] as Vector3))
+	var arm := LimbIk.chain_length(skeleton, chain, off)
+	var gap := sampler.seen.distance_to(grip)
+	sampler.queue_free()
+	_expect(
+		gap <= arm * OFF_HAND_LIMIT,
+		(
+			"%s 的副手離 %s 的握點 %.1f 公分（%.2f 倍臂長，上限 %.2f）"
+			+ "——手部 IK 沒接上，或是待機姿勢把武器放到搆不到的地方了"
+		)
+		% [visual.character_id, kind, gap * 100.0, gap / arm, OFF_HAND_LIMIT]
+	)
 
 
 ## 道具那一半：放上去會開、門會沉、拿走了不會關（latch）。
