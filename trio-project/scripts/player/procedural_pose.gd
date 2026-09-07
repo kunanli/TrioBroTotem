@@ -39,6 +39,17 @@ const POSE_FADE_TIME := 0.2
 ## 但也不能是瞬間的，那會變成一格跳過去。
 const STATE_FADE_TIME := 0.12
 
+## 轉身傾斜：每秒轉幾度算「全力甩過去」。
+##
+## 260 度是從手感參數推的：`player_character.gd` 的 `TURN_TIME` 是 0.07 秒，
+## 一次 180 度的急轉大約在 0.1 秒內完成，瞬時角速度遠超過這個值——所以急轉
+## 一定吃滿，而慢慢繞著走只會吃到一點點。那正好是想要的分界。
+const PIVOT_FULL_RATE := 260.0
+
+## 轉身傾斜的淡入淡出。比 STATE_FADE_TIME 再快一點：傾斜要跟得上轉向本身，
+## 慢了就會變成「人已經轉完了才開始倒」。
+const PIVOT_FADE_TIME := 0.08
+
 ## 呼吸與擺動在軀幹上的分配。
 const BREATH_SPINE := 0.6
 const BREATH_CHEST := 0.4
@@ -76,6 +87,8 @@ var _carry_weight := 0.0
 var _carry_target := 0.0
 var _air_weight := 0.0
 var _air_target := 0.0
+var _turn_weight := 0.0
+var _turn_target := 0.0
 var _look_valid := false
 var _look_point := Vector3.ZERO
 var _look_yaw := 0.0
@@ -127,6 +140,14 @@ func set_airborne(airborne: bool) -> void:
 	_air_target = 1.0 if airborne else 0.0
 
 
+## 目前的轉向角速度（度／秒，正的是向左轉）。轉得越快，往內側傾得越多。
+##
+## 這一層取代了原本打算做的 `turn` 片段。理由見 MotionClips.PIVOT_POSE：
+## 那支片段的觸發條件在遊戲裡永遠不成立，而且片段會蓋掉走路，轉身時腿會僵住。
+func set_turn_rate(degrees_per_second: float) -> void:
+	_turn_target = clampf(degrees_per_second / PIVOT_FULL_RATE, -1.0, 1.0)
+
+
 func _process_modification() -> void:
 	var skeleton := get_skeleton()
 	if skeleton == null or space == null:
@@ -143,6 +164,7 @@ func _process_modification() -> void:
 	var state_step := 1.0 - exp(-delta / STATE_FADE_TIME)
 	_carry_weight = lerpf(_carry_weight, _carry_target, state_step)
 	_air_weight = lerpf(_air_weight, _air_target, state_step)
+	_turn_weight = lerpf(_turn_weight, _turn_target, 1.0 - exp(-delta / PIVOT_FADE_TIME))
 	_advance_look(delta)
 
 	var wanted := _accumulate()
@@ -182,7 +204,7 @@ func _build(skeleton: Skeleton3D) -> void:
 	# 扛東西與滯空用到的骨頭要明確註冊，不能靠「class_pose 剛好也有」。
 	# _add() 對沒註冊的骨頭是**靜默略過**——某天有人改了某隻角色的職業姿態，
 	# 那隻角色的扛東西姿勢就會無聲無息地不見。
-	for pose in [MotionClips.CARRY_POSE, MotionClips.AIRBORNE_POSE]:
+	for pose in [MotionClips.CARRY_POSE, MotionClips.AIRBORNE_POSE, MotionClips.PIVOT_POSE]:
 		for key in pose:
 			var bone: StringName = key
 			if not names.has(bone):
@@ -263,6 +285,14 @@ func _accumulate() -> Dictionary:
 		for key in MotionClips.AIRBORNE_POSE:
 			var bone: StringName = key
 			_add(out, bone, (MotionClips.AIRBORNE_POSE[bone] as Vector3) * _air_weight)
+
+	# ⑦ 轉身傾斜。權重是有正負的——往右轉就是整組乘上負數，所以 PIVOT_POSE
+	# 只放軀幹骨的 Y 與 Z（見那邊的說明）。這一層跟④⑤⑥一樣不吃移動減半：
+	# **跑步中轉彎正是最看得出來的地方**，淡掉就等於沒做。
+	if absf(_turn_weight) > 0.01:
+		for key in MotionClips.PIVOT_POSE:
+			var bone: StringName = key
+			_add(out, bone, (MotionClips.PIVOT_POSE[bone] as Vector3) * _turn_weight)
 	return out
 
 

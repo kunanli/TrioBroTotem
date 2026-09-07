@@ -28,8 +28,12 @@ const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 
 var _failures: Array[String] = []
 
+## 驗過幾條。以前是手寫在最後那行 print 裡的數字，加了規則忘了改就會對不上。
+var _rules := 0
+
 
 func _ready() -> void:
+	await _check_animations()
 	NetworkService.host_game(PROBE_PORT)
 	var world: Node3D = load("res://scenes/world/test_arena.tscn").instantiate()
 	add_child(world)
@@ -46,8 +50,54 @@ func _ready() -> void:
 
 	for line in _failures:
 		printerr("[Beat] %s" % line)
-	print("[Beat] 驗了 24 條規則，%d 條不成立" % _failures.size())
+	print("[Beat] 驗了 %d 條規則，%d 條不成立" % [_rules, _failures.size()])
 	get_tree().quit(1 if _failures.size() > 0 else 0)
+
+
+## 三隻角色的每一個邏輯動畫名稱都要解析得到，而且武器要真的掛上手。
+##
+## 為什麼這條值得一驗：`CharacterVisual._clip()` 找不到就**安靜地退回走路**。
+## `idle` 與 `run` 兩支就是這樣缺了整整一輪都沒有人發現的——`drive()` 從第一天
+## 就在問 `run`，而它從來不存在，跑步一直只是加速播放的走路。
+## 「安靜地不做事」正是這個專案一路在抓的那一類問題。
+##
+## `forged/` 開頭的那一條是第二層保險：關鍵字比對會讓 `walk` 也撞上某些名稱，
+## 所以光是「解析得到」還不夠，生成的那三支必須真的是生成出來的。
+func _check_animations() -> void:
+	for id in CharacterRoster.SLOT_ORDER:
+		var visual := CharacterVisual.new()
+		add_child(visual)
+		visual.load_character(id)
+
+		var missing: Array[String] = []
+		for key in CharacterVisual.CLIP_ALIASES:
+			if visual.clip_for(key) == &"":
+				missing.append(String(key))
+		_expect(missing.is_empty(), "%s 解析不到這幾支動畫：%s" % [id, ", ".join(missing)])
+
+		var not_forged: Array[String] = []
+		for key in [&"idle", &"run"]:
+			if not String(visual.clip_for(key)).begins_with("%s/" % MotionForge.LIBRARY_NAME):
+				not_forged.append("%s -> %s" % [key, visual.clip_for(key)])
+		_expect(
+			not_forged.is_empty(),
+			"%s 這幾支不是生成的，被關鍵字比對撞到別支了：%s" % [id, ", ".join(not_forged)]
+		)
+
+		var wanted: int = (CharacterRoster.entry(id).get("weapons", []) as Array).size()
+		var sockets := visual.find_children("*Socket", "BoneAttachment3D", true, false)
+		_expect(
+			sockets.size() == wanted,
+			"%s 名冊寫了 %d 把武器，實際掛上去 %d 把" % [id, wanted, sockets.size()]
+		)
+		# queue_free 不是 free：這底下有 Ragdoll 建出來的 PhysicalBone3D，
+		# 當場拆掉物理節點會讓 Jolt 抱怨。反正它們不在任何群組裡，
+		# 多活一幀不會干擾後面的檢查。
+		visual.queue_free()
+	# 等一幀讓 queue_free 真的執行掉，再往下載入世界。
+	# 不等的話這三隻會多活幾幀、`_process` 照跑，跟後面的檢查混在同一個場上——
+	# 這支探針被「場上剛好有別的東西」騙過不只一次了（見 `_clear_stage()`）。
+	await get_tree().process_frame
 
 
 ## 道具那一半：放上去會開、門會沉、拿走了不會關（latch）。
@@ -456,5 +506,6 @@ func _wait(frames: int) -> void:
 
 
 func _expect(condition: bool, message: String) -> void:
+	_rules += 1
 	if not condition:
 		_failures.append(message)

@@ -42,6 +42,7 @@ scenes/
   world/tent.tscn        帳篷（**有碰撞**，以前那兩個是穿得過去的方塊）
   world/totem.tscn       圖騰：三隻不同族疊在一起（docs/02 的核心意象）
   tools/level_probe.tscn 截圖探針，不進 exe（export_presets 的 exclude_filter）
+  tools/animation_lab.tscn 動畫展示場：三隻並排輪播全部動畫，一樣不進 exe
 scripts/
   autoload/
     network_service.gd   TD-03：唯一碰 MultiplayerPeer 的地方
@@ -55,6 +56,9 @@ scripts/
     weight_ladder.gd     重量階梯，全遊戲唯一一張表
     carryable.gd         可被抓起的元件（玩家與場景物件共用）
   player/player_character.gd  TD-02：自己的角色自己算，其他人插值
+  player/motion_clips.gd 生成動畫的姿勢資料（含共同底姿 STANCE 與逐職業站姿）
+  player/motion_forge.gd 載入時把姿勢資料建成 Animation
+  player/weapon_rack.gd  劍／弓／法杖，掛在手骨的 BoneAttachment3D 上
   world/prop.gd          host 權威的場景物理物件
     game_flow.gd         開始畫面 → 營地 → 任務關卡，host 權威
   world/mission_board.gd 走過去按互動就出發
@@ -284,8 +288,15 @@ python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
 
 ### 畫面與描邊在哪調
 
-這一區的東西**在這台機器上看不到**（headless 的 llvmpipe 不畫蒙皮網格），
-所以下面每一個數字都只驗過「有生效」，沒有驗過「好不好看」。覺得不對就直接調。
+> **更正：這台機器看得到蒙皮角色。** 上面那句「llvmpipe 不畫蒙皮網格」是
+> 換成 Xvfb ＋ Mesa lavapipe ＋ Forward+ **之前**寫的，之後沒有人回頭驗過，
+> 於是它在這份文件裡多活了好幾輪。實際跑過：豬戰士整隻畫得出來、貼圖與
+> 描邊都在、走路動畫每一格都在動（連續四張截圖各差 3.5–4.3 萬個像素）。
+> 所以角色動畫在這台機器上**驗得了「好不好看」**，工具是
+> `python3 tools/shoot_anim.py`。`level_probe.gd` 仍然用膠囊替身，那是因為
+> 它要的是比例尺不是角色，不是因為畫不出來。
+
+下面每一個數字原本都只驗過「有生效」。現在拍得到畫面了，覺得不對就直接調。
 
 **整體畫面**：`scenes/world/default_env.tres` 一份共用的 Environment，
 `camp.tscn` 與 `test_arena.tscn` 都指過去，各自只覆蓋要不一樣的
@@ -313,21 +324,91 @@ python3 tools/check_project.py      # 會比對兩邊，不一致就失敗
 
 ### 生成的動畫在哪調
 
-跳躍、落地、受擊、倒下這四支**沒有美術資產**，是程式用骨骼旋轉建出來的（TD-12）。
+**三份 GLB 各自只帶一支動畫，名字叫 `walk`。** 其餘全部是程式用骨骼旋轉建出來
+的（TD-12）：`idle` / `run` / 三段連擊 / 衝刺與空中攻擊 / 受擊 / 倒下 / 跳躍 / 落地。
 
-- **姿勢**：`scripts/player/motion_clips.gd`。`JUMP` / `LAND` / `HURT` / `DEATH`
-  是關鍵影格陣列，每一格寫「在哪個相位（`phase`）的幾成（`at`）、哪根骨頭轉幾度」。
-  角度是**角色空間的尤拉角**，不是骨骼的區域座標——三隻角色的骨架朝向不一樣，
-  寫區域座標的話同一份資料在不同角色身上會歪掉。
+- **姿勢**：`scripts/player/motion_clips.gd`。角度是**角色空間的尤拉角**，
+  不是骨骼的區域座標——三隻角色的骨架朝向不一樣，寫區域座標的話同一份資料
+  在不同角色身上會歪掉。
 - **長度**：`scripts/player/motion_forge.gd` 的 `NON_COMBAT`，每一支自己寫
   `windup` / `active` / `recovery`。跳躍的 `windup` 只有 0.05 秒——調長會覺得
-  「按下去沒反應」。
-- **扛東西與滯空**是**疊加姿勢**不是片段（`CARRY_POSE` / `AIRBORNE_POSE`，
-  由 `procedural_pose.gd` 的第五、六層加上去），因為它們必須跟走路共存：
-  上半身抱著、腿照常走。做成片段的話扛著東西就不能走路了。
+  「按下去沒反應」。攻擊的長度直接來自 `CombatSpec`，不在這裡。
+- **`STANCE` 是所有生成片段的共同底姿**（上臂各往身側放下 74 度）。生成片段
+  寫進骨頭的是「靜置姿勢 + 偏移」，而這三份骨架的靜置姿勢是**雙手平舉的
+  T 字**——沒有這一層的話，這個檔案裡每一個手臂的數字都是從平舉開始算的，
+  手從頭到尾都打橫。這一輪才發現，因為以前在這台機器上看不到角色。
+- **`run` 不是手刻的**，是把匯入的 `walk` 每一格「離靜置姿勢的偏差」外插放大
+  `RUN_STRIDE`（1.45）倍，再疊一個固定前傾。落腳的時機原封不動保留下來——
+  那是手刻跑步最難做對的部分。改 `RUN_STRIDE` 會連 `CharacterVisual` 的
+  `RUN_REFERENCE_SPEED` 一起改（它是算出來的），兩邊分開寫的話腳會開始滑。
+- **扛東西、滯空、轉身傾斜**是**疊加姿勢**不是片段（`CARRY_POSE` /
+  `AIRBORNE_POSE` / `PIVOT_POSE`，由 `procedural_pose.gd` 的第五到七層加上去），
+  因為它們必須跟走路共存：上半身抱著、腿照常走。做成片段的話扛著東西就不能
+  走路了。
+  > 轉身本來是打算做成一支 `turn` 片段的，做完才發現**它永遠不會播**：
+  > `player_character.gd` 的 `_yaw` 只在移動時才更新，所以觸發條件寫的
+  > 「站著不動卻轉了一大圈」在遊戲裡不可能成立。改成疊加層之後轉多快就疊
+  > 多少，而且**跑步中轉彎也吃得到**——那才是真正看得出來的地方。
+
+**待機的姿勢是三層相加的**，改之前先弄清楚在改哪一層：`STANCE`（共同底姿）
+＋ `MotionClips.IDLE`（這一隻的持械架式）＋ `character_roster.gd` 的
+`pose.bones`（ProceduralPose 每幀再疊的職業姿態，走路時也在作用）。
+想改「站著的時候手臂在哪」改第二層，想改「走路的時候」才動第三層。
 
 **骨頭名字打錯是靜默失敗**——那條軌道不會建出來，也不會有任何錯誤訊息，
-只是那根骨頭不動。`tools/check_project.py` 抓不到這個，改完姿勢資料請在遊戲裡看一眼。
+只是那根骨頭不動。**片段整支缺掉也是靜默失敗**：`CharacterVisual._clip()`
+找不到就退回走路，`run` 就是這樣缺了整整一輪沒有人發現的。後者現在有
+`beat_probe` 逐隻逐名在檢查，前者還是只能自己看。
+
+### 看動畫的工具
+
+    python3 tools/shoot_anim.py          # 全套：GIF ＋ 聯絡表
+    python3 tools/shoot_anim.py --seconds 6 --no-gif
+
+`scenes/tools/animation_lab.tscn` 把三隻並排放在台座上輪播全部的動畫，鏡頭
+慢慢繞。編輯器裡按 ▶ 就會一直播；上面那支工具則是逐幀截圖再用 Pillow 疊成
+GIF（這台機器沒有 ffmpeg）。這個場景不進出貨的 exe——`exclude_filter` 把
+`scenes/tools/` 整個排掉了。
+
+調姿勢的數字時**看聯絡表比看 GIF 快**：它平均取樣整輪排成 4×4，一眼掃得完。
+
+兩個取景上踩過的坑，改 `animation_lab.gd` 之前先看一眼：
+
+- **要看側面就轉角色，不要轉鏡頭。** 三隻是排成一列的，鏡頭一斜，最遠的
+  那隻就被透視縮成一半、還被中間那隻擋住（實測 0.52 弧度拍出來豬只剩一小點）。
+  所以鏡頭幾乎正對（`STILL_ANGLE`），改成每一隻各自側開 `FACE_TURN`——
+  彼此距離不變，武器卻從身體旁邊分離出來了。
+- **逐幀存檔時鏡頭是停住的**，`--orbit` 才會繞。這是檔案大小不是美感：鏡頭
+  一動每個像素都變了，GIF 的逐幀差分完全失效。繞鏡頭的版本實測 44.8 MB。
+
+### 武器
+
+三把武器（劍／弓／法杖）是用 Godot 原始形狀在程式裡組的
+（`scripts/player/weapon_rack.gd`），掛在 `BoneAttachment3D` 上跟著手骨走。
+顏色一律從 `Palette` 拿——配色表封閉在 25 色，武器沒有新增任何一個。
+
+**逐隻的位置與角度寫在 `character_roster.gd` 的 `weapons`。** 那幾個角度沒辦法
+用推的：手骨的朝向跟著當下的姿勢跑，靜置姿勢下的三軸方向跟垂手站姿差了
+大約 75 度。照靜置姿勢推出來的角度，站著看就是三把橫躺的武器（實際踩過）。
+
+所以有一支反解工具。改了 `MotionClips.IDLE` 的手臂角度就要重跑一次——
+**手臂動了，武器就歪了**：
+
+```bash
+godot --headless --path trio-project res://scenes/tools/weapon_aim.tscn
+```
+
+它會載入三隻、讓 `idle` 真的播起來、姿態層也收斂，再從掛載點當下的世界朝向
+反解出 spin，直接印成可以貼回名冊的三行。想改武器指哪裡就改那支檔案裡的
+`TARGETS`（寫的是角色空間的方向），不要手動試角度。
+
+> 三把武器都是**往外扳開 40–50 度**而不是垂直的。理由是這三隻是大頭身：
+> 頭佔了大約一半的身高，手卻在髖部旁邊——武器一垂直就整支埋進頭與軀幹的
+> 剪影裡，畫面上只剩一小截。
+
+**還沒解決的**：武器焊在手骨上，所以走路時手臂擺多少、武器就跟著甩多少。
+跑步已經把手臂的擺動壓到 0.85（`RUN_ARM_SWING`）來收斂它，走路的擺動是
+匯入動畫自己的，沒有動。要真的穩住得做手部 IK，跟腳滑是同一批工作。
 
 ### 角色模型與動畫
 

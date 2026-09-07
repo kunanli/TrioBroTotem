@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tools/weapon_aim.gd" id="1_aim"]
+
+[node name="WeaponAim" type="Node3D"]
+script = ExtResource("1_aim")

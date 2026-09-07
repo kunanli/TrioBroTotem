@@ -12,10 +12,22 @@ extends RefCounted
 ## 生成工具或手動改過的模型可能不一樣。
 ##
 ## idle_hold 是「沒有 idle 動畫時，走路動畫要停在哪一幀」（0 到 1 的比例）。
-## Meshy 目前只給了走路，站著不動時得從走路循環裡挑一個看起來像站姿的位置。
 ## 0.55 是實測掃過整個循環挑出來的：三隻在這一幀雙腳最靠攏（前後距離 0.00–0.02
-## 個身高，對比第 0 幀的 0.04–0.06、跨步中的 0.31）。之後真的有 idle 了，
-## CharacterVisual 會自動改用它，這個欄位就沒作用了。
+## 個身高，對比第 0 幀的 0.04–0.06、跨步中的 0.31）。
+##
+## **現在已經有 idle 了**（MotionForge 生成，見 motion_clips.gd 的 IDLE），
+## 所以這個欄位平常用不到——它是備援：生成失敗時 `_stand()` 還是有東西可以擺，
+## 不會退回雙手平舉的 T 字站在那裡。留著的成本是一行，拿掉的代價是
+## 「生成一壞掉，畫面上就是三尊 T 字雕像」。
+##
+## weapons 是這隻手上拿的東西（scripts/player/weapon_rack.gd）。
+##   kind  劍／弓／法杖，零件表寫在 WeaponRack
+##   bone  掛在哪根手骨
+##   at    在**手骨的局部座標**下的偏移，單位是「1.6 公尺角色的公尺數」，
+##         掛的時候會乘上這隻的骨架高度比例。+Y 是往身體外側（也就是
+##         從手腕往拳頭的方向），所以 0.06 大約就是「握在拳心」。
+##   spin  疊在 WeaponRack.GRIP_SPIN 上的微調角度（度）。
+## 手骨的三軸方向見 weapon_rack.gd 的檔頭——調這幾個數字前先看那裡。
 ##
 ## pose 是程序化姿態層的參數（scripts/player/procedural_pose.gd）。
 ## 角度單位是度，Vector3(X, Y, Z) 在「角色空間」下解讀：
@@ -31,6 +43,12 @@ const CHARACTERS := {
 		"height": 1.6,
 		"yaw_offset": 180.0,
 		"idle_hold": 0.55,
+		"weapons": [
+			{
+				"kind": &"sword", "bone": &"RightHand",
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(94.0, 0.0, 50.0),
+			},
+		],
 		"pose": {
 			"breath_amplitude": 1.4,
 			"breath_period": 4.0,
@@ -55,6 +73,12 @@ const CHARACTERS := {
 		"height": 1.4,
 		"yaw_offset": 180.0,
 		"idle_hold": 0.55,
+		"weapons": [
+			{
+				"kind": &"staff", "bone": &"RightHand",
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(60.0, 0.0, 48.0),
+			},
+		],
 		"pose": {
 			"breath_amplitude": 0.6,
 			"breath_period": 4.6,
@@ -84,6 +108,12 @@ const CHARACTERS := {
 		"height": 1.7,
 		"yaw_offset": 180.0,
 		"idle_hold": 0.55,
+		"weapons": [
+			{
+				"kind": &"bow", "bone": &"LeftHand",
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(108.0, 0.0, -21.0),
+			},
+		],
 		"pose": {
 			"breath_amplitude": 0.8,
 			"breath_period": 2.6,

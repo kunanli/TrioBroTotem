@@ -46,6 +46,11 @@ const NON_COMBAT := {
 	},
 }
 
+## 待機片段的長度。內容是靜態的（呼吸與擺動由 ProceduralPose 疊），
+## 所以這個數字只決定「首尾兩格隔多遠」，多長都一樣——但不能是 0，
+## `_forge()` 會把長度 0 的片段當成沒東西丟掉。
+const IDLE_LENGTH := 2.0
+
 
 ## 建出這隻角色的全部生成動畫，掛進 AnimationPlayer。
 ##
@@ -73,11 +78,101 @@ static func attach(player: AnimationPlayer, skeleton: Skeleton3D, space: Node3D,
 		library.add_animation(clip_name, animation)
 		built += 1
 
+	# 待機與跑步不走 `_build_all()`：一個是靜態的持械架式、一個是從匯入的走路
+	# 循環改出來的，兩者都不是「windup → active → recovery」那個形狀。
+	var idle := _forge_hold(MotionClips.IDLE.get(character_id, {}), skeleton, space, track_root)
+	if idle != null:
+		library.add_animation(&"idle", idle)
+		built += 1
+	var run := _forge_run(_imported_walk(player), skeleton, space)
+	if run != null:
+		library.add_animation(&"run", run)
+		built += 1
+
 	if built > 0:
 		if player.has_animation_library(LIBRARY_NAME):
 			player.remove_animation_library(LIBRARY_NAME)
 		player.add_animation_library(LIBRARY_NAME, library)
 	return built
+
+
+## 靜態的持械站姿。首尾兩格內容一樣，所以循環起來不會跳格。
+static func _forge_hold(pose: Dictionary, skeleton: Skeleton3D, space: Node3D,
+		track_root: String) -> Animation:
+	if pose.is_empty():
+		return null
+	var animation := _forge(
+		[{"time": 0.0, "pose": pose}, {"time": IDLE_LENGTH, "pose": pose}],
+		skeleton, space, track_root
+	)
+	if animation != null:
+		animation.loop_mode = Animation.LOOP_LINEAR
+	return animation
+
+
+## 模型自己帶進來的走路片段。生成的那一份不算——名字裡也有 "walk" 的話
+## 會撞到，所以只找不在生成 library 裡的。
+static func _imported_walk(player: AnimationPlayer) -> Animation:
+	for item in player.get_animation_list():
+		var name: String = item
+		if name.begins_with("%s/" % LIBRARY_NAME):
+			continue
+		if name.to_lower().contains("walk"):
+			return player.get_animation(name)
+	return null
+
+
+## 跑步：把走路循環的每一格繞著它自己的平均姿勢外插放大，再疊一個固定的前傾。
+##
+## 為什麼不手刻：走路是這三份 GLB 唯一帶進來的動畫，而它有真正的落腳時機。
+## 外插的作法把那個節奏原封不動保留下來，只是把步幅與擺手放大——手刻一支
+## 跑步最容易露餡的正是落腳的時機，而那正是這裡不需要碰的部分。
+##
+## 放大是**繞著這條軌自己的平均姿勢**做的，不是繞著骨架的靜置姿勢。
+##
+## 這一點差很多。第一版是繞靜置姿勢放大：腿沒問題（靜置的腿本來就是直立的，
+## 跟走路循環的平均值幾乎一樣），但**手臂的靜置姿勢是平舉的 T 字**，繞著它
+## 放大等於「跑得越快、手張得越開」，跑起來像在滑翔。繞平均姿勢放大就只是
+## 「同一個擺動、幅度更大」，那才是跑步跟走路真正的差別。
+##
+## 數學：每一格是 `q`，這條軌的平均是 `mean`，放大後是 `mean.slerp(q, 1.45)`
+## ——slerp 的參數超過 1 就是外插，方向不變、轉得更多。最後再乘上前傾。
+static func _forge_run(walk: Animation, skeleton: Skeleton3D, space: Node3D) -> Animation:
+	if walk == null or skeleton == null:
+		return null
+	var run: Animation = walk.duplicate(true)
+	var lean: Dictionary = MotionClips.RUN_LEAN
+	var frames := BoneSpace.frames(skeleton, space, lean.keys())
+	var touched := 0
+	for track in run.get_track_count():
+		if run.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+			continue
+		var bone := StringName(run.track_get_path(track).get_subname(0))
+		var index := skeleton.find_bone(String(bone))
+		if index < 0:
+			continue
+		var stretch := MotionClips.RUN_STRIDE
+		if MotionClips.ARM_BONES.has(bone):
+			stretch = MotionClips.RUN_ARM_SWING
+		var mean := _mean_rotation(run, track)
+		# 前傾是左乘上去的角色空間旋轉，跟 `_forge()` 寫關鍵影格時同一個約定。
+		# 這裡不必再乘 rest——`mean.slerp(value, ...)` 本來就已經是含靜置的完整姿勢。
+		var extra := Quaternion.IDENTITY
+		if frames.has(bone):
+			extra = BoneSpace.local(frames[bone], lean[bone])
+		for key in run.track_get_key_count(track):
+			var value: Quaternion = run.track_get_key_value(track, key)
+			run.track_set_key_value(track, key, (extra * mean.slerp(value, stretch)).normalized())
+			touched += 1
+	# 數的是**關鍵影格**不是軌道數。被匯入流程壓縮過的軌道還在，只是一格都
+	# 讀不到——數軌道的話這裡會通過，然後回傳一支跟走路一模一樣的「跑步」。
+	if touched == 0:
+		# 走路片段被匯入流程壓縮過就會走到這裡（壓縮軌讀不到關鍵影格）。
+		# 靜靜地回傳一支跟走路一模一樣的東西比較糟——那正是這一輪在修的病。
+		push_warning("[Forge] 走路片段裡沒有讀得到的旋轉軌，跑步生不出來")
+		return null
+	run.loop_mode = Animation.LOOP_LINEAR
+	return run
 
 
 ## 每支動畫的關鍵影格：{片段名: [{"time": 秒, "pose": {骨名: 角度}}, …]}
@@ -159,9 +254,16 @@ static func _phase_keys(spec: Dictionary, frames: Array, stretch: float) -> Arra
 ## 關鍵影格 → Animation。每根出現過的骨頭一條 rotation_3d 軌。
 static func _forge(keys: Array, skeleton: Skeleton3D, space: Node3D,
 		track_root: String) -> Animation:
+	# 每一格都先疊上共同底姿（把手臂從 T 字放下來）。**不能只疊有寫到手臂的
+	# 那幾格**——沒疊到的那一格手會彈回平舉，而中間是插值，看起來就是甩手。
+	var posed: Array = []
+	for entry in keys:
+		var key: Dictionary = entry
+		posed.append({"time": key["time"], "pose": _with_stance(key["pose"])})
+
 	var names: Array = []
 	var length := 0.0
-	for entry in keys:
+	for entry in posed:
 		var key: Dictionary = entry
 		length = maxf(length, float(key["time"]))
 		for bone in key["pose"]:
@@ -184,13 +286,44 @@ static func _forge(keys: Array, skeleton: Skeleton3D, space: Node3D,
 		var track := animation.add_track(Animation.TYPE_ROTATION_3D)
 		animation.track_set_path(track, NodePath("%s:%s" % [track_root, bone]))
 		animation.track_set_interpolation_type(track, Animation.INTERPOLATION_CUBIC)
-		for item in keys:
+		for item in posed:
 			var frame: Dictionary = item
 			var pose: Dictionary = frame["pose"]
 			var offset: Vector3 = pose.get(bone, Vector3.ZERO)
 			var value := BoneSpace.local(entry, offset) * rest
 			animation.rotation_track_insert_key(track, float(frame["time"]), value.normalized())
 	return animation
+
+
+## 一條旋轉軌的平均姿勢。
+##
+## 四元數不能直接相加平均——`q` 與 `−q` 是同一個旋轉，混著加會互相抵消成
+## 一團亂。所以先把每一格都翻到跟第一格同一個半球（內積為負就取負），
+## 再相加正規化。走路循環的擺動幅度不大，這個近似夠用。
+static func _mean_rotation(animation: Animation, track: int) -> Quaternion:
+	var count := animation.track_get_key_count(track)
+	if count == 0:
+		return Quaternion.IDENTITY
+	var first: Quaternion = animation.track_get_key_value(track, 0)
+	var sum := Quaternion(0.0, 0.0, 0.0, 0.0)
+	for key in count:
+		var value: Quaternion = animation.track_get_key_value(track, key)
+		if value.dot(first) < 0.0:
+			value = -value
+		sum = Quaternion(sum.x + value.x, sum.y + value.y, sum.z + value.z, sum.w + value.w)
+	var length := Vector4(sum.x, sum.y, sum.z, sum.w).length()
+	if length < 0.0001:
+		return first
+	return Quaternion(sum.x / length, sum.y / length, sum.z / length, sum.w / length)
+
+
+## 共同底姿加上這一格自己的偏移。
+static func _with_stance(pose: Dictionary) -> Dictionary:
+	var out: Dictionary = MotionClips.STANCE.duplicate()
+	for key in pose:
+		var bone: StringName = key
+		out[bone] = (out.get(bone, Vector3.ZERO) as Vector3) + (pose[bone] as Vector3)
+	return out
 
 
 ## 軌道路徑要相對於 AnimationPlayer 的 root_node，不能寫死。

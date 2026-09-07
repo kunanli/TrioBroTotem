@@ -17,6 +17,31 @@ extends RefCounted
 ##     幅度不能大，大了會變成慢動作。
 ##   - 出手的那一格是**整段最極端的姿勢**，不是中間值。
 ##   - 收招走回中性，最後一格一定是空 pose，否則會殘留姿勢。
+##
+## **這個檔案裡所有手臂的數字都是相對於 STANCE（下面那一段）的。**
+## 一開始不是——一開始是相對於骨架的靜置姿勢，也就是雙手平舉的 T 字，
+## 所以「手舉高」寫成 −52 度實際上只是「從平舉往前掃 52 度」，手一直是打橫的。
+## 加上 STANCE 那一層之後全部重調過一輪，而且是**看著畫面**調的
+## （python3 tools/shoot_anim.py）——這是第一次能這樣做。
+
+## **所有生成片段的共同底姿：把手臂從 T 字放下來。**
+##
+## 這是這一輪才發現的一個大坑。生成片段寫進去的是「靜置姿勢 + 偏移」
+## （見 motion_forge.gd 的 `_forge()`），而這三份骨架的靜置姿勢是**雙手平舉
+## 的 T 字**。所以在這個檔案裡寫 `LeftUpperArm: Vector3(-52, 0, -10)`，實際
+## 看到的不是「手抬到胸前」而是「從平舉的位置再往前掃 52 度」——手從頭到尾
+## 都是打橫的。
+##
+## 之前沒有人發現，因為在這台機器上看不到角色（那句話這一輪才被推翻）。
+## 修法是給所有生成片段一個共同的底姿：上臂各往身側放下 74 度。加上這一層
+## 之後，這個檔案裡其餘的手臂數字才真的是「相對於垂手站姿」的意思。
+##
+## 74 度是量出來的：這樣手腕大約落在髖部的高度，跟匯入的走路循環站定那一格
+## 對得上——切換動畫的時候手臂才不會跳一下。
+const STANCE := {
+	&"LeftUpperArm": Vector3(0.0, 0.0, 74.0),
+	&"RightUpperArm": Vector3(0.0, 0.0, -74.0),
+}
 
 ## 三隻共用：受擊。短、只有一格衝擊 + 回復。
 const HURT := [
@@ -81,8 +106,8 @@ const JUMP := [
 			&"RightUpperLeg": Vector3(26.0, 0.0, 0.0),
 			&"LeftLowerLeg": Vector3(-40.0, 0.0, 0.0),
 			&"RightLowerLeg": Vector3(-40.0, 0.0, 0.0),
-			&"LeftUpperArm": Vector3(14.0, 0.0, -6.0),
-			&"RightUpperArm": Vector3(14.0, 0.0, 6.0),
+			&"LeftUpperArm": Vector3(10.0, 0.0, 8.0),
+			&"RightUpperArm": Vector3(10.0, 0.0, -8.0),
 		},
 	},
 	{
@@ -94,8 +119,8 @@ const JUMP := [
 			&"RightUpperLeg": Vector3(-8.0, 0.0, 0.0),
 			&"LeftLowerLeg": Vector3(-4.0, 0.0, 0.0),
 			&"RightLowerLeg": Vector3(-4.0, 0.0, 0.0),
-			&"LeftUpperArm": Vector3(-52.0, 0.0, -10.0),
-			&"RightUpperArm": Vector3(-52.0, 0.0, 10.0),
+			&"LeftUpperArm": Vector3(-30.0, 0.0, -110.0),
+			&"RightUpperArm": Vector3(-30.0, 0.0, 110.0),
 		},
 	},
 	{
@@ -106,8 +131,8 @@ const JUMP := [
 			&"RightUpperLeg": Vector3(12.0, 0.0, 0.0),
 			&"LeftLowerLeg": Vector3(-34.0, 0.0, 0.0),
 			&"RightLowerLeg": Vector3(-24.0, 0.0, 0.0),
-			&"LeftUpperArm": Vector3(-24.0, 0.0, -12.0),
-			&"RightUpperArm": Vector3(-24.0, 0.0, 12.0),
+			&"LeftUpperArm": Vector3(-16.0, 0.0, -60.0),
+			&"RightUpperArm": Vector3(-16.0, 0.0, 60.0),
 		},
 	},
 ]
@@ -128,8 +153,8 @@ const LAND := [
 			&"RightUpperLeg": Vector3(34.0, 0.0, 0.0),
 			&"LeftLowerLeg": Vector3(-52.0, 0.0, 0.0),
 			&"RightLowerLeg": Vector3(-52.0, 0.0, 0.0),
-			&"LeftUpperArm": Vector3(20.0, 0.0, -20.0),
-			&"RightUpperArm": Vector3(20.0, 0.0, 20.0),
+			&"LeftUpperArm": Vector3(14.0, 0.0, -52.0),
+			&"RightUpperArm": Vector3(14.0, 0.0, 52.0),
 		},
 	},
 	{"phase": &"recovery", "at": 1.0, "pose": {}},
@@ -166,22 +191,22 @@ const CARRY_POSE := {
 ## 幅度是三隻裡最大的——戰士的辨識度就在「慢半拍但很重」。
 const PIG_SWING := {
 	"windup": {
-		&"Spine": Vector3(9.0, -14.0, 0.0),
-		&"Chest": Vector3(7.0, -10.0, 0.0),
-		&"Head": Vector3(-4.0, 8.0, 0.0),
-		&"LeftUpperArm": Vector3(-64.0, 0.0, -18.0),
-		&"RightUpperArm": Vector3(-70.0, 0.0, 16.0),
-		&"LeftLowerArm": Vector3(-40.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-46.0, 0.0, 0.0),
+		&"Spine": Vector3(12.0, -16.0, 0.0),
+		&"Chest": Vector3(8.0, -10.0, 0.0),
+		&"Head": Vector3(-6.0, 8.0, 0.0),
+		&"LeftUpperArm": Vector3(-20.0, 0.0, -128.0),
+		&"RightUpperArm": Vector3(-26.0, 0.0, 128.0),
+		&"LeftLowerArm": Vector3(-46.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-52.0, 0.0, 0.0),
 	},
 	"impact": {
-		&"Spine": Vector3(-22.0, 16.0, 0.0),
-		&"Chest": Vector3(-14.0, 12.0, 0.0),
+		&"Spine": Vector3(-26.0, 18.0, 0.0),
+		&"Chest": Vector3(-16.0, 12.0, 0.0),
 		&"Head": Vector3(-10.0, -6.0, 0.0),
-		&"LeftUpperArm": Vector3(36.0, 0.0, -10.0),
-		&"RightUpperArm": Vector3(40.0, 0.0, 8.0),
-		&"LeftLowerArm": Vector3(-12.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-10.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-58.0, 0.0, -30.0),
+		&"RightUpperArm": Vector3(-58.0, 0.0, 30.0),
+		&"LeftLowerArm": Vector3(-16.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-16.0, 0.0, 0.0),
 	},
 }
 
@@ -192,46 +217,170 @@ const PIG_SWING := {
 ## 正負顛倒的話會變成「蓄力時手往前伸、出手時手往後縮」——實測踩過。
 const CAT_SHOT := {
 	"windup": {
-		&"Spine": Vector3(0.0, -16.0, 0.0),
+		&"Spine": Vector3(0.0, -18.0, 0.0),
 		&"Chest": Vector3(-3.0, -10.0, 0.0),
-		&"Head": Vector3(0.0, 12.0, 0.0),
-		&"LeftUpperArm": Vector3(-46.0, 0.0, -8.0),
-		&"RightUpperArm": Vector3(-16.0, 0.0, 22.0),
-		&"LeftLowerArm": Vector3(-18.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-64.0, 0.0, 0.0),
+		&"Head": Vector3(0.0, 14.0, 0.0),
+		&"LeftUpperArm": Vector3(-80.0, 0.0, -64.0),
+		&"RightUpperArm": Vector3(-58.0, 0.0, 34.0),
+		&"LeftLowerArm": Vector3(-6.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-92.0, 0.0, 0.0),
 	},
 	"impact": {
-		&"Spine": Vector3(-4.0, 8.0, 0.0),
-		&"Chest": Vector3(-2.0, 6.0, 0.0),
+		&"Spine": Vector3(0.0, 6.0, 0.0),
+		&"Chest": Vector3(-2.0, 4.0, 0.0),
 		&"Head": Vector3(2.0, -2.0, 0.0),
-		&"LeftUpperArm": Vector3(-52.0, 0.0, -6.0),
-		&"RightUpperArm": Vector3(-30.0, 0.0, 30.0),
-		&"LeftLowerArm": Vector3(-6.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-20.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-82.0, 0.0, -66.0),
+		&"RightUpperArm": Vector3(-40.0, 0.0, 46.0),
+		&"LeftLowerArm": Vector3(-4.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-30.0, 0.0, 0.0),
 	},
 }
 
 ## 蛙法師：前推法杖。蓄力時手收到胸前畫圓，出手時整條手臂直推出去。
 const FROG_CAST := {
 	"windup": {
-		&"Spine": Vector3(6.0, -10.0, 0.0),
-		&"Chest": Vector3(5.0, -8.0, 0.0),
+		&"Spine": Vector3(8.0, -12.0, 0.0),
+		&"Chest": Vector3(6.0, -8.0, 0.0),
 		&"Head": Vector3(-6.0, 4.0, 0.0),
-		&"LeftUpperArm": Vector3(-20.0, 0.0, -20.0),
-		&"RightUpperArm": Vector3(-24.0, 0.0, 20.0),
-		&"LeftLowerArm": Vector3(-56.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-62.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-48.0, 0.0, -30.0),
+		&"RightUpperArm": Vector3(-54.0, 0.0, 34.0),
+		&"LeftLowerArm": Vector3(-70.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-78.0, 0.0, 0.0),
 	},
 	"impact": {
-		&"Spine": Vector3(-12.0, 8.0, 0.0),
-		&"Chest": Vector3(-8.0, 6.0, 0.0),
+		&"Spine": Vector3(-14.0, 10.0, 0.0),
+		&"Chest": Vector3(-9.0, 7.0, 0.0),
 		&"Head": Vector3(-4.0, -4.0, 0.0),
-		&"LeftUpperArm": Vector3(-44.0, 0.0, -12.0),
-		&"RightUpperArm": Vector3(-48.0, 0.0, 12.0),
-		&"LeftLowerArm": Vector3(-8.0, 0.0, 0.0),
-		&"RightLowerArm": Vector3(-6.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-70.0, 0.0, -44.0),
+		&"RightUpperArm": Vector3(-84.0, 0.0, 50.0),
+		&"LeftLowerArm": Vector3(-16.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-10.0, 0.0, 0.0),
 	},
 }
+
+## 站姿：三隻各自的持械架式。**這一支補起來之前，「待機」是把走路動畫停在
+## 第 0.55 幀**（character_roster.gd 的 idle_hold），而 CharacterVisual._stand()
+## 從第一天就在問 `idle` 了，只是沒有人做過。
+##
+## **畫面上的姿勢是三層相加的**，調數字之前要先弄清楚在調哪一層：
+##
+##   ① STANCE          上臂放下 74 度的共同底姿（上面那一段）
+##   ② 這裡            這一隻的持械架式
+##   ③ 名冊的 pose.bones  ProceduralPose 每幀再疊的職業姿態
+##
+## 所以手臂的數字看起來會怪：法師的右上臂在這裡是 +82，因為名冊那一層已經
+## 往內收了 52 度（那是為了修這隻骨架本身手張太開，走路時要，站著時太多）。
+## −74 + 82 − 52 = −44 度，那才是畫面上看到的角度。想改「站著的時候手臂在哪」
+## 就改這裡；想改「走路的時候」才去動名冊。
+##
+## 腿一定要寫。生成的片段只驅動有寫到的骨頭，沒寫的會停在上一支動畫留下的
+## 那一格——不寫腿的話，站定時的腳會停在走路循環的隨機一步上，而且**每次
+## 停下來的姿勢都不一樣**。攻擊片段可以不寫腿（它只播 0.3 秒就還給走路），
+## 待機不行，那是會一直停在畫面上的東西。
+const IDLE := {
+	# 戰士：方肩、重心壓低、雙腳張開，右臂往外撐讓劍離開身體的剪影
+	#（右上臂淨值 −74 + 12 + 14 = −48 度），左手空著微微張開。
+	&"pig_warrior": {
+		&"Spine": Vector3(-6.0, -8.0, 0.0),
+		&"Chest": Vector3(3.0, 6.0, 0.0),
+		&"Head": Vector3(0.0, 4.0, 0.0),
+		&"RightUpperArm": Vector3(-16.0, 0.0, 12.0),
+		&"RightLowerArm": Vector3(-32.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-6.0, 0.0, -8.0),
+		&"LeftLowerArm": Vector3(-14.0, 0.0, 0.0),
+		&"LeftUpperLeg": Vector3(0.0, 0.0, -6.0),
+		&"RightUpperLeg": Vector3(0.0, 0.0, 6.0),
+		&"LeftLowerLeg": Vector3(-8.0, 0.0, 0.0),
+		&"RightLowerLeg": Vector3(-8.0, 0.0, 0.0),
+	},
+	# 法師：站得最直，法杖立在身側偏前，左手收在胸前。
+	#
+	# 右上臂的 Z 是**大的正值**，跟另外兩隻相反：這隻的名冊 pose 已經把右臂
+	# 往內收了 52 度（那是為了修骨架本身手張太開），照抄另外兩隻的寫法會把
+	# 手臂插進軀幹。+82 是把它扳回來，淨值 −44 度。
+	&"frog_mage": {
+		&"Spine": Vector3(3.0, 6.0, 0.0),
+		&"Chest": Vector3(2.0, -4.0, 0.0),
+		&"Head": Vector3(-4.0, 0.0, 0.0),
+		&"RightUpperArm": Vector3(-24.0, 0.0, 82.0),
+		&"RightLowerArm": Vector3(-10.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-8.0, 0.0, -78.0),
+		&"LeftLowerArm": Vector3(4.0, 0.0, 0.0),
+		&"LeftUpperLeg": Vector3(0.0, 0.0, -4.0),
+		&"RightUpperLeg": Vector3(0.0, 0.0, 4.0),
+		&"LeftLowerLeg": Vector3(-4.0, 0.0, 0.0),
+		&"RightLowerLeg": Vector3(-4.0, 0.0, 0.0),
+	},
+	# 弓手：側身站（Spine 的 Y 是三隻裡唯一大的），左手把弓抬起來推離身體
+	#（左上臂淨值 +74 − 42 − 5 = +27 度，三隻裡抬得最高的一隻手），
+	# 右手停在胸前像隨時要抽箭。側身是弓手最強的剪影特徵。
+	&"cat_archer": {
+		&"Spine": Vector3(0.0, 14.0, 0.0),
+		&"Chest": Vector3(-2.0, -6.0, 0.0),
+		&"Head": Vector3(0.0, -10.0, 0.0),
+		&"LeftUpperArm": Vector3(-26.0, 0.0, -42.0),
+		&"LeftLowerArm": Vector3(4.0, 0.0, 0.0),
+		&"RightUpperArm": Vector3(-10.0, 0.0, 20.0),
+		&"RightLowerArm": Vector3(-46.0, 0.0, 0.0),
+		&"LeftUpperLeg": Vector3(0.0, 0.0, -7.0),
+		&"RightUpperLeg": Vector3(0.0, 0.0, 5.0),
+		&"LeftLowerLeg": Vector3(-6.0, 0.0, 0.0),
+		&"RightLowerLeg": Vector3(-6.0, 0.0, 0.0),
+	},
+}
+
+## 三隻共用：轉身時往內側傾。**這是疊加姿勢，不是片段。**
+##
+## 本來做成一支 `turn` 片段，做完才發現**它永遠不會播**：`player_character.gd`
+## 的 `_yaw` 只在 `moving` 為真時才更新，所以「站著不動卻轉了一大圈」這個
+## 觸發條件在遊戲裡根本不成立。那正是這個專案一路在抓的那類東西——
+## 一支做好了、掛好了、驗證也「通過」了，但從第一天起就沒有播過的動畫。
+##
+## 改成疊加層之後三個問題一起解掉：不必挑觸發時機（轉多快就疊多少）、
+## 不會擋住走路（片段會整支蓋掉 locomotion，轉身時腿會僵住）、
+## 而且**跑步中轉彎也吃得到**——那才是真正看得出來的地方。
+##
+## 這一組數字是「往左轉」的。往右轉時整組乘上負的權重就好，所以**只准放
+## Y 與 Z 分量、只准放軀幹骨**：手臂左右不對稱，乘負號不等於鏡像。
+const PIVOT_POSE := {
+	&"Hips": Vector3(0.0, -4.0, -7.0),
+	&"Spine": Vector3(0.0, 6.0, -5.0),
+	&"Chest": Vector3(0.0, 6.0, -3.0),
+	&"Head": Vector3(0.0, 10.0, 0.0),
+}
+
+## 跑步不是手刻的，是**把匯入的走路循環改出來的**。
+##
+## 為什麼：走路是這三份 GLB 唯一帶進來的動畫，而它有真正的落腳時機——
+## 那是手刻關鍵影格最難做對、也最容易露餡的東西。與其從零刻一支跑步，
+## 不如把走路的每一格繞著**這條軌自己的平均姿勢**外插放大（同一個擺動、
+## 幅度更大），再疊一個固定的前傾。落腳的節奏原封不動保留下來。
+##
+## STRIDE 同時是外插倍率**與**速度匹配的依據：步幅放大 1.45 倍之後，同樣的
+## 移動速度只需要 1/1.45 的步頻。CharacterVisual 的 RUN_REFERENCE_SPEED 就是
+## 從這個數字算的——兩邊分開寫的話，調了這裡而忘了那裡，腳就會開始滑。
+const RUN_STRIDE := 1.45
+
+## 手臂骨。放大幅度時手臂要單獨算——見 motion_forge.gd 的 `_forge_run()`。
+const ARM_BONES: Array[StringName] = [
+	&"LeftShoulder", &"LeftUpperArm", &"LeftLowerArm", &"LeftHand",
+	&"RightShoulder", &"RightUpperArm", &"RightLowerArm", &"RightHand",
+]
+
+## 跑步時手臂的擺動倍率。
+##
+## 比步幅小很多，而且是**故意的**：三隻手上都有武器，而武器是焊在手骨上的，
+## 手臂擺多少武器就甩多少。把手臂也放大 1.45 倍的話，法師的法杖跑起來會像
+## 在划船。0.85 讓上半身穩住、步幅照樣放大——拿著東西跑本來就不會大甩手。
+const RUN_ARM_SWING := 0.85
+
+## 疊在跑步每一格上的固定偏移。頭要往回抬，否則前傾會變成低頭衝刺。
+const RUN_LEAN := {
+	&"Spine": Vector3(-13.0, 0.0, 0.0),
+	&"Chest": Vector3(-6.0, 0.0, 0.0),
+	&"Head": Vector3(10.0, 0.0, 0.0),
+}
+
 
 ## 每隻角色的出手姿勢。之後多一隻角色就多一組，不必動 motion_forge.gd。
 const SWINGS := {

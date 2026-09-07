@@ -46,6 +46,17 @@ const ACTION_BLEND_TIME := 0.04
 ## 否則腳會在地上滑。調到腳不滑為止。
 const WALK_REFERENCE_SPEED := 1.6
 
+## 跑步片段「原本」對應的移動速度。
+##
+## 跑步是把走路的步幅外插放大 `RUN_STRIDE` 倍生出來的（見 motion_forge.gd），
+## 步幅大了 1.45 倍，同樣的地面速度就只需要 1/1.45 的步頻。這個數字**一定要
+## 從 RUN_STRIDE 算**，不能自己寫一個——兩邊分開寫的話，調了步幅而忘了這裡，
+## 腳就會開始滑，而且滑得很輕微、很難察覺是哪裡的問題。
+const RUN_REFERENCE_SPEED := WALK_REFERENCE_SPEED * MotionClips.RUN_STRIDE
+
+## 超過這個速度就改播跑步。
+const RUN_SPEED := WALK_REFERENCE_SPEED * 1.6
+
 const SPEED_SCALE_RANGE := Vector2(0.6, 1.8)
 
 ## 低於這個速度算站著不動。
@@ -83,12 +94,21 @@ var _clips: Dictionary = {}
 ## 沒有 idle 動畫時，走路動畫要停在哪一秒。
 var _idle_hold := 0.0
 
+## 轉身傾斜要用的：上一幀的朝向，用來算角速度。
+var _last_yaw := 0.0
+var _moving := false
+
 ## 站姿是否已經擺好。
 ##
 ## 不能用 current_animation 判斷：Godot 的 pause() 會把 current_animation 清成
 ## 空字串（但 current_animation_position 保留），所以「current != walk」永遠成立，
 ## _stand() 會每一幀重新 play + seek + pause，混合也跟著每幀重啟。
 var _holding := false
+
+
+func _ready() -> void:
+	# 第一幀的角度差要有個基準，否則出生的那一瞬間會被當成轉了一大圈。
+	_last_yaw = global_rotation.y
 
 
 ## 回傳是否成功載入模型。失敗時呼叫端應該保留膠囊當備援。
@@ -113,6 +133,11 @@ func load_character(id: StringName) -> bool:
 		_model = null
 		return false
 
+	# 骨架要在複製材質**之前**找到，武器也要在那之前掛上去。
+	# 順序反了的話 _cache_materials() 走不到武器的網格，結果是武器沒有描邊、
+	# 而且打到人的時候身體閃白、武器不閃——像貼在角色身上的一張紙。
+	_find_skeleton()
+	WeaponRack.attach(_skeleton, entry, _measure_height())
 	_cache_materials(bool(entry.get("alpha", false)))
 	_attach_pose(entry)
 	_fix_cull_bounds(float(entry.get("height", 1.8)))
@@ -298,14 +323,21 @@ func _fix_cull_bounds(target_height: float) -> void:
 		mesh.extra_cull_margin = target_height * 4.0
 
 
+## 找出模型裡的骨架。武器、程序化姿態、布娃娃、剔除修正全都要用到它，
+## 所以獨立成一步，在載入流程的前段就做掉。
+func _find_skeleton() -> void:
+	var skeletons := _model.find_children("*", "Skeleton3D", true, false)
+	if skeletons.is_empty():
+		push_warning("[Visual] %s 沒有 Skeleton3D，沒有武器也沒有程序化姿態" % character_id)
+		return
+	_skeleton = skeletons[0]
+
+
 ## 把程序化姿態層掛到骨架底下。SkeletonModifier3D 必須是 Skeleton3D 的子節點，
 ## 引擎才會在動畫寫完姿勢之後呼叫它。
 func _attach_pose(entry: Dictionary) -> void:
-	var skeletons := _model.find_children("*", "Skeleton3D", true, false)
-	if skeletons.is_empty():
-		push_warning("[Visual] %s 沒有 Skeleton3D，跳過程序化姿態" % character_id)
+	if _skeleton == null:
 		return
-	_skeleton = skeletons[0]
 	_pose = ProceduralPose.new()
 	_pose.name = "ProceduralPose"
 	_pose.configure(entry, self)
@@ -435,6 +467,28 @@ func _process(delta: float) -> void:
 		if _player != null:
 			_player.speed_scale = 0.0 if _freeze_timer > 0.0 else 1.0
 	_tick_punch(delta)
+	_tick_pivot(delta)
+
+
+## 把當下的轉向角速度餵給姿態層，讓它往內側傾（ProceduralPose 的第七層）。
+##
+## 角速度是自己從節點的世界朝向量的，不是由 PlayerCharacter 傳進來的——
+## 這樣不必為了一個純表演的東西在玩家的狀態機上多開一條路。
+##
+## **原本這裡做的是「站著不動卻轉了一大圈就播一支 turn 片段」，那個條件在
+## 遊戲裡永遠不成立**：`player_character.gd` 的 `_yaw` 只在移動時才更新，
+## 所以「站著不動」與「正在轉」不可能同時為真。做成疊加層之後就沒有這個
+## 問題了——轉多快就疊多少，跑步中轉彎也吃得到。
+func _tick_pivot(delta: float) -> void:
+	var yaw := global_rotation.y
+	var rate := rad_to_deg(angle_difference(_last_yaw, yaw)) / maxf(delta, 0.0001)
+	_last_yaw = yaw
+	if _pose == null:
+		return
+	if _ragdoll != null and _ragdoll.active:
+		_pose.set_turn_rate(0.0)
+		return
+	_pose.set_turn_rate(rate)
 
 
 ## 等體積的擠壓：拉長多少，橫向就縮多少，看起來才像有彈性的東西被打到，
@@ -464,6 +518,14 @@ func _write_punch(value: Vector3) -> void:
 	scale = value
 	if _ragdoll != null:
 		_ragdoll.scale = Vector3(1.0 / value.x, 1.0 / value.y, 1.0 / value.z)
+
+
+## 這個邏輯名稱實際解析到了哪一支動畫（沒有就是空字串）。
+##
+## 給探針用的。`_clip()` 找不到就安靜地退回走路——`run` 就是這樣缺了整整
+## 一輪沒有人發現的。`beat_probe` 逐隻逐名檢查，讓下一次缺片段時會有人喊。
+func clip_for(logical: StringName) -> StringName:
+	return _clip(logical)
 
 
 func available() -> PackedStringArray:
@@ -550,14 +612,22 @@ func clear_look_target() -> void:
 func drive(speed: float) -> void:
 	if _pose != null:
 		_pose.set_motion(speed / WALK_REFERENCE_SPEED)
+	_moving = speed >= IDLE_SPEED
 	if _player == null or _action != &"" or _freeze_timer > 0.0:
 		return
 
-	if speed < IDLE_SPEED:
+	if not _moving:
 		_stand()
 		return
 
-	var wanted := _clip(&"run") if speed > WALK_REFERENCE_SPEED * 1.6 else &""
+	# 播哪一支就用哪一支的基準速度算播放倍率。兩支的步幅不一樣，
+	# 共用一個基準的話跑起來腳一定滑。
+	var reference := WALK_REFERENCE_SPEED
+	var wanted := &""
+	if speed > RUN_SPEED:
+		wanted = _clip(&"run")
+		if wanted != &"":
+			reference = RUN_REFERENCE_SPEED
 	if wanted == &"":
 		wanted = _clip(&"walk")
 	if wanted == &"":
@@ -568,7 +638,7 @@ func drive(speed: float) -> void:
 	elif not _player.is_playing():
 		_player.play(wanted)  # 從站姿的暫停狀態恢復
 	_player.speed_scale = clampf(
-		speed / WALK_REFERENCE_SPEED, SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
+		speed / reference, SPEED_SCALE_RANGE.x, SPEED_SCALE_RANGE.y
 	)
 
 
