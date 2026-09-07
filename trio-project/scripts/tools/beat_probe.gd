@@ -23,6 +23,10 @@ const OFF_HAND_LIMIT := 0.10
 ## 驗副手之前先空推幾幀，讓待機播起來、IK 淡入、姿態層收斂。
 const OFF_HAND_FRAMES := 60
 
+## 生成片段的過衝檢查：每支軌道取幾個樣、容許幾度。
+const OVERSHOOT_SAMPLES := 240
+const OVERSHOOT_TOLERANCE := 3.0
+
 ## 驗 AI 時把不相干的角色搬到哪裡去。
 const PARK_X := 200.0
 
@@ -119,6 +123,7 @@ func _check_animations() -> void:
 		)
 
 		await _check_off_hand(visual)
+		_check_overshoot(visual)
 		# queue_free 不是 free：這底下有 Ragdoll 建出來的 PhysicalBone3D，
 		# 當場拆掉物理節點會讓 Jolt 抱怨。反正它們不在任何群組裡，
 		# 多活一幀不會干擾後面的檢查。
@@ -127,6 +132,51 @@ func _check_animations() -> void:
 	# 不等的話這三隻會多活幾幀、`_process` 照跑，跟後面的檢查混在同一個場上——
 	# 這支探針被「場上剛好有別的東西」騙過不只一次了（見 `_clear_stage()`）。
 	await get_tree().process_frame
+
+
+## 生成片段播出來的角度不得超過關鍵格寫的。
+##
+## 為什麼這條值得一驗：它壞掉的樣子是「動作很詭異」，而不是哪裡報錯。CUBIC 照
+## 關鍵格的索引算曲線、不管時間間距，攻擊的蓄力格與出手格隔 9 毫秒、後面接 140
+## 毫秒的停頓，曲線在轉角甩出去——豬的衝刺撞擊關鍵格寫 35 度、播出來 156 度，
+## 整個人折到地上；連輕擊都從 32 變 76。修法是密取樣＋線性（`MotionForge._forge`），
+## 這裡守著它不要被改回去。門檻留 3 度給 slerp 本身的小誤差。
+func _check_overshoot(visual: CharacterVisual) -> void:
+	var player := visual.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	if player == null:
+		return
+	var worst := 0.0
+	var worst_name := ""
+	for item in player.get_animation_list():
+		var name := String(item)
+		if not name.begins_with("%s/" % MotionForge.LIBRARY_NAME):
+			continue
+		var anim := player.get_animation(name)
+		for track in anim.get_track_count():
+			if anim.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+				continue
+			if anim.track_get_key_count(track) == 0:
+				continue
+			var first: Quaternion = anim.track_get_key_value(track, 0)
+			var keyed := 0.0
+			for k in anim.track_get_key_count(track):
+				keyed = maxf(keyed, rad_to_deg(first.angle_to(anim.track_get_key_value(track, k))))
+			var sampled := 0.0
+			for i in OVERSHOOT_SAMPLES:
+				var q: Quaternion = anim.rotation_track_interpolate(
+					track, anim.length * float(i) / OVERSHOOT_SAMPLES
+				)
+				sampled = maxf(sampled, rad_to_deg(first.angle_to(q)))
+			if sampled - keyed > worst:
+				worst = sampled - keyed
+				worst_name = "%s:%s（關鍵格 %.0f°、播出來 %.0f°）" % [
+					name, anim.track_get_path(track).get_subname(0), keyed, sampled
+				]
+	_expect(
+		worst <= OVERSHOOT_TOLERANCE,
+		"%s 的生成片段插值過衝 %.0f°：%s——`MotionForge._forge` 又用回 CUBIC 了？"
+		% [visual.character_id, worst, worst_name]
+	)
 
 
 ## 雙手武器的副手要真的握在武器上。

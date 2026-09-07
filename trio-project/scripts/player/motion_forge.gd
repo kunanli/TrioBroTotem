@@ -13,6 +13,9 @@ extends RefCounted
 
 const LIBRARY_NAME := &"forged"
 
+## 生成片段的取樣率。關鍵影格先在這個頻率下密取樣再存進軌道，理由見 `_forge()`。
+const SAMPLE_HZ := 60.0
+
 ## 收招收過頭的倍率——`settle` 的招式（重擊、衝刺撞擊）用這個，比
 ## `MotionClips.FOLLOW_FACTOR` 大，收招時會多一個「站不穩」的感覺。時間點共用
 ## `MotionClips.FOLLOW_AT`。
@@ -319,6 +322,13 @@ static func _forge(keys: Array, skeleton: Skeleton3D, space: Node3D,
 	if frames.is_empty():
 		return null
 
+	# **密取樣、線性存，不用 CUBIC。** 這是踩過才知道的：CUBIC 是照關鍵格的**索引**
+	# 算曲線，不管時間間距。攻擊的蓄力格與出手格只隔 9–12 毫秒、後面卻接一段
+	# 140 毫秒的停頓，曲線在那個轉角會甩出去——實測豬的衝刺撞擊關鍵格寫 35 度，
+	# 播出來脊椎轉到 **156 度**，整個人折到地上；連輕擊都從 32 度變 76 度。
+	# 所以關鍵格之間自己用 smoothstep 做 slerp、每秒取 60 個樣再存進軌道，
+	# 軌道用 LINEAR：不會過衝，而且每一段都有 ease in/out。
+	# `beat_probe` 有一條規則守著：插值後的最大角度不得超過關鍵格寫的。
 	var animation := Animation.new()
 	animation.length = length
 	animation.loop_mode = Animation.LOOP_NONE
@@ -328,14 +338,54 @@ static func _forge(keys: Array, skeleton: Skeleton3D, space: Node3D,
 		var rest := skeleton.get_bone_rest(int(entry["index"])).basis.get_rotation_quaternion()
 		var track := animation.add_track(Animation.TYPE_ROTATION_3D)
 		animation.track_set_path(track, NodePath("%s:%s" % [track_root, bone]))
-		animation.track_set_interpolation_type(track, Animation.INTERPOLATION_CUBIC)
+		animation.track_set_interpolation_type(track, Animation.INTERPOLATION_LINEAR)
+		var sparse: Array = []  # [[秒, Quaternion], …]，照時間排
 		for item in posed:
 			var frame: Dictionary = item
 			var pose: Dictionary = frame["pose"]
 			var offset: Vector3 = pose.get(bone, Vector3.ZERO)
-			var value := BoneSpace.local(entry, offset) * rest
-			animation.rotation_track_insert_key(track, float(frame["time"]), value.normalized())
+			sparse.append([float(frame["time"]), (BoneSpace.local(entry, offset) * rest).normalized()])
+		sparse.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+		for value in _resample(sparse, length):
+			animation.rotation_track_insert_key(track, float(value[0]), value[1])
 	return animation
+
+
+## 稀疏的關鍵格 → 每秒 60 個樣。相鄰兩格之間用 smoothstep 做 slerp。
+## 關鍵格本身的時間點一定會被取到，出手那一格才不會被取樣點跨過去。
+static func _resample(sparse: Array, length: float) -> Array:
+	var out: Array = []
+	if sparse.is_empty():
+		return out
+	var times: Array = []
+	var steps := int(ceil(length * SAMPLE_HZ))
+	for i in steps + 1:
+		times.append(minf(float(i) / SAMPLE_HZ, length))
+	for key in sparse:
+		times.append(float(key[0]))
+	times.sort()
+	var last := -1.0
+	for entry in times:
+		var t := float(entry)
+		if t - last < 0.0005:
+			continue
+		last = t
+		out.append([t, _sample(sparse, t)])
+	return out
+
+
+static func _sample(sparse: Array, t: float) -> Quaternion:
+	if t <= float(sparse[0][0]):
+		return sparse[0][1]
+	for index in range(1, sparse.size()):
+		var next: Array = sparse[index]
+		if t > float(next[0]):
+			continue
+		var here: Array = sparse[index - 1]
+		var span := float(next[0]) - float(here[0])
+		var u := 1.0 if span <= 0.0 else (t - float(here[0])) / span
+		return (here[1] as Quaternion).slerp(next[1], smoothstep(0.0, 1.0, u))
+	return sparse[sparse.size() - 1][1]
 
 
 ## 一條旋轉軌的平均姿勢。
