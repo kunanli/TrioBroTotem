@@ -67,7 +67,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"sword", "bone": &"RightHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(94.0, 0.0, 50.0),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(94, 0.0, 50),
 			},
 		],
 		"pose": {
@@ -98,7 +98,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"staff", "bone": &"RightHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(-34.0, 0.0, 31.0),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(46, 0.0, -23),
 			},
 		],
 		"pose": {
@@ -134,7 +134,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"bow", "bone": &"LeftHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(108.0, 0.0, -21.0),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(108, 0.0, -20),
 			},
 		],
 		"pose": {
