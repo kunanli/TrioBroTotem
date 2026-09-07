@@ -30,11 +30,24 @@ const SLACK := 0.02
 ## 追上手的時間常數（秒）。弦是有張力的東西，不會瞬間跟上，但也不能拖。
 const FOLLOW_TIME := 0.04
 
+## 箭什麼時候出現、什麼時候算放手（拉開的距離，武器自己的座標）。
+##
+## 兩個門檻不一樣是遲滯：走路時 IK 把右手接在弦上、身體在晃，`pull` 會在 `SLACK`
+## 附近抖，用同一個門檻箭會一閃一閃。拉到 6 公分才算在拉弓，掉回 2 公分以下才算
+## 放手——放手那一幀箭消失、放一道箭痕。**放手是從弦的狀態判的，不另外接時間軸**：
+## 弦本來就是跟著右手走的。
+const ARROW_SHOW := 0.06
+const ARROW_RELEASE := 0.02
+
 var _upper: MeshInstance3D = null
 var _lower: MeshInstance3D = null
 var _hand: HandIk = null
 var _nock := Vector3.ZERO
 var _ready_parts := false
+var _arrow: MeshInstance3D = null
+var _arrow_head: MeshInstance3D = null
+var _pull := 0.0
+var _drawn := false
 
 
 ## 由 `CharacterVisual` 在 `HandIk` 建好之後接上。沒接上的話弦就是靜止的直線，
@@ -49,6 +62,8 @@ func _ready() -> void:
 		return
 	_upper = root.get_node_or_null("string_upper") as MeshInstance3D
 	_lower = root.get_node_or_null("string_lower") as MeshInstance3D
+	_arrow = root.get_node_or_null("arrow") as MeshInstance3D
+	_arrow_head = root.get_node_or_null("arrow_head") as MeshInstance3D
 	_ready_parts = _upper != null and _lower != null
 	if not _ready_parts:
 		push_warning("[BowString] 找不到弦的兩段，弓弦不會被拉開")
@@ -61,6 +76,7 @@ func _process(delta: float) -> void:
 	_nock = _nock.lerp(_wanted(), 1.0 - exp(-delta / FOLLOW_TIME))
 	_stretch(_upper, WeaponRack.BOW_NOCKS["upper"], _nock)
 	_stretch(_lower, WeaponRack.BOW_NOCKS["lower"], _nock)
+	_track_arrow()
 
 
 ## 搭箭點該在哪。右手的位置投影到弦所在的那個平面（x = 0），再夾在合理範圍內。
@@ -72,11 +88,44 @@ func _wanted() -> Vector3:
 		return rest
 	var hand := _hand.draw_point
 	var pull := minf(rest.z - hand.z, WeaponRack.BOW_DRAW)
+	_pull = pull
 	if pull < SLACK:
 		return rest
 	# 上下也跟著手走一點，但範圍要小——搭箭點跑到弓臂上就不是拉弓了。
 	var lift := clampf(hand.y, -0.2, 0.2)
 	return Vector3(0.0, lift, rest.z - pull)
+
+
+## 箭跟著搭箭點走；拉到位才出現，放手那一幀消失並放箭痕。
+func _track_arrow() -> void:
+	if _arrow == null:
+		return
+	if not _drawn and _pull > ARROW_SHOW:
+		_drawn = true
+	elif _drawn and _pull < ARROW_RELEASE:
+		_drawn = false
+		_release()
+	_arrow.visible = _drawn
+	if _arrow_head != null:
+		_arrow_head.visible = _drawn
+	if not _drawn:
+		return
+	# 箭桿的原點在弦上（搭箭點），往 +Z 伸出去；箭頭在桿子末端。
+	var rest: Vector3 = WeaponRack.BOW_NOCKS["rest"]
+	var shift := _nock - rest
+	_arrow.position = Vector3(0.0, 0.0, 0.146) + shift
+	if _arrow_head != null:
+		_arrow_head.position = Vector3(0.0, 0.0, 0.486) + shift
+
+
+## 放手：一道兩公尺的箭痕從搭箭點飛向弓的前方（+Z）然後熄掉。
+##
+## **不是投射物、不是射程**——判定照舊是 `AttackController` 那顆 2 公尺內的球，
+## 這只是讓「放箭」看得見。粒子的速度與壽命乘起來大約就是判定球的距離。
+func _release() -> void:
+	var here := to_global(_nock)
+	var forward := global_transform.basis.z.normalized()
+	Vfx.burst(&"arrow_streak", here, forward)
 
 
 ## 把一段弦接在兩點之間。方塊的長軸是 +Y，所以要把它轉到兩點的連線上。

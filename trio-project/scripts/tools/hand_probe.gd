@@ -236,11 +236,15 @@ func _measure(
 	var gap_max := -INF
 	var over_max := 0.0
 	var head_min := INF
+	var arrow := skeleton.find_child("arrow", true, false) as MeshInstance3D
+	var arrow_frames := 0
 	var to_space := visual.global_transform.affine_inverse() * skeleton.global_transform
 	for _index in int((QUICK_SAMPLE if _quick else SAMPLE_SECONDS) / STEP):
 		await _advance(visual, player, speed)
 		if not sampler.captured:
 			continue
+		if arrow != null and arrow.visible:
+			arrow_frames += 1
 		# 角色一直在往前走，所以每一幀的換算矩陣都要重取。
 		to_space = visual.global_transform.affine_inverse() * skeleton.global_transform
 		var hand_pose: Transform3D = sampler.hand_pose
@@ -301,6 +305,11 @@ func _measure(
 				else "　← 太靠近頭了，去看 shoot_anim 的圖"
 			),
 		]
+		+ (
+			"　**箭出現 %d 幀（不該出現）**" % arrow_frames
+			if arrow != null and arrow_frames > 0
+			else ""
+		)
 	)
 
 
@@ -333,19 +342,27 @@ func _measure_strike(
 	]
 	var rest_axis := _weapon_axis(visual, skeleton, sampler.hand_pose)
 
+	var arrow := skeleton.find_child("arrow", true, false) as MeshInstance3D
+	var arrow_frames := 0
 	visual.play_action(&"attack1")
 	var clip_length := player.get_animation(player.current_animation).length
 	var forward := 0.0
 	var down := 0.0
+	var back := 0.0
+	var up := 0.0
 	var slip := 0.0
 	var settled := -1.0
 	var t := 0.0
 	while t < clip_length + STRIKE_WATCH:
 		await _advance(visual, player, 0.0)
 		t += STEP
+		if arrow != null and arrow.visible:
+			arrow_frames += 1
 		var here := _space_point(visual, skeleton, sampler.seen[0])
 		forward = maxf(forward, rest_hips.z - here.z)  # 面向 −Z，往前是 z 變小
 		down = maxf(down, rest_hips.y - here.y)
+		back = maxf(back, here.z - rest_hips.z)
+		up = maxf(up, here.y - rest_hips.y)
 		for side in 2:
 			var foot := _space_point(visual, skeleton, sampler.seen[1 + side])
 			slip = maxf(slip, Vector2(foot.x - rest_feet[side].x, foot.z - rest_feet[side].z).length())
@@ -356,15 +373,43 @@ func _measure_strike(
 			settled = -1.0
 	sampler.queue_free()
 	print(
-		"  [Strike] attack1 %.2fs → 髖往前 %.1f cm　往下 %.1f cm　腳滑 %.1f cm　手臂回到待機 %s"
+		(
+			"  [Strike] attack1 %.2fs → 髖前 %.1f 後 %.1f 上 %.1f 下 %.1f cm　腳滑 %.1f cm"
+			+ "　手臂回到待機 %s　第二段 %s"
+		)
 		% [
 			clip_length,
 			forward * 100.0,
+			back * 100.0,
+			up * 100.0,
 			down * 100.0,
 			slip * 100.0,
 			("%.2fs（從出招算起）" % settled) if settled >= 0.0 else "**沒有回來**",
+			_mirror_report(player, visual),
 		]
+		+ ("　箭出現 %d 幀" % arrow_frames if arrow != null else "")
 	)
+
+
+## 第二段有沒有鏡像：比 attack2 片段裡左右上臂各轉了多少。鏡像的話跟第一段相比
+## 左右會對調——這裡直接印兩邊的幅度，弓與杖該是持械那一側大。
+func _mirror_report(player: AnimationPlayer, visual: CharacterVisual) -> String:
+	var clip := visual.clip_for(&"attack2")
+	if clip == &"" or not player.has_animation(clip):
+		return "（沒有 attack2）"
+	var anim := player.get_animation(clip)
+	var swing := {"LeftUpperArm": 0.0, "RightUpperArm": 0.0}
+	for track in anim.get_track_count():
+		if anim.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+			continue
+		var bone := String(anim.track_get_path(track).get_subname(0))
+		if not swing.has(bone):
+			continue
+		var first: Quaternion = anim.track_get_key_value(track, 0)
+		for key in anim.track_get_key_count(track):
+			var q: Quaternion = anim.track_get_key_value(track, key)
+			swing[bone] = maxf(swing[bone], rad_to_deg(first.angle_to(q)))
+	return "左臂 %.0f° 右臂 %.0f°" % [swing["LeftUpperArm"], swing["RightUpperArm"]]
 
 
 ## 武器指的方向（角色空間）。武器掛在手骨的 −Y 上（`weapon_rack.gd` 的 GRIP_SPIN）。

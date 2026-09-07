@@ -127,18 +127,23 @@ func configure(owner_space: Node3D, seed_name: String) -> void:
 
 
 ## 出招。`spec` 是 `CombatSpec` 的那一筆（windup／active／recovery，秒），
-## `scale` 是 `MotionClips.COMBO_SHAPE` 的幅度倍率（重擊更大）。
-func strike(spec: Dictionary, scale: float) -> void:
+## `profile` 是這把武器的 `MotionClips.WEAPON_STRIKES`（蓄力／出手／過衝各往哪裡），
+## `scale` 是那一段的幅度倍率（重擊更大）。沒有 profile 就用上面那組常數——那是
+## 劍的打法，不是每一把都該往前撲。
+func strike(spec: Dictionary, profile: Dictionary, scale: float) -> void:
 	var windup := float(spec.get("windup", 0.08))
 	var active := float(spec.get("active", 0.08))
 	var recovery := float(spec.get("recovery", 0.16))
 	var hit := windup + active
+	var load: Vector3 = profile.get("load", Vector3(0.0, 0.0, STRIKE_BACK))
+	var land: Vector3 = profile.get("hit", Vector3(0.0, -STRIKE_DOWN, -STRIKE_FORWARD))
+	var over: Vector3 = profile.get("over", Vector3(0.0, 0.0, STRIKE_OVERSHOOT))
 	_strike_keys = [
 		[0.0, Vector3.ZERO],
-		[windup * STRIKE_LOAD_AT, Vector3(0.0, 0.0, STRIKE_BACK * scale)],
-		[windup, Vector3(0.0, -STRIKE_DOWN * scale, -STRIKE_FORWARD * scale)],
-		[hit, Vector3(0.0, -STRIKE_DOWN * scale, -STRIKE_FORWARD * scale)],
-		[hit + recovery * STRIKE_OVERSHOOT_AT, Vector3(0.0, 0.0, STRIKE_OVERSHOOT * scale)],
+		[windup * STRIKE_LOAD_AT, load * scale],
+		[windup, land * scale],
+		[hit, land * scale],
+		[hit + recovery * STRIKE_OVERSHOOT_AT, over * scale],
 		[hit + recovery, Vector3.ZERO],
 	]
 	_strike_time = 0.0

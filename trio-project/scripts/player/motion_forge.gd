@@ -77,11 +77,15 @@ const IDLE_LENGTH := 2.0
 ## 回傳建了幾支。skeleton 找不到需要的骨頭時會少建幾條軌，但不會失敗——
 ## 少一根手臂總比整個攻擊沒有動畫好。
 static func attach(player: AnimationPlayer, skeleton: Skeleton3D, space: Node3D,
-		character_id: StringName) -> int:
+		character_id: StringName, weapon: StringName = &"") -> int:
 	if player == null or skeleton == null or space == null:
 		return 0
 	var swing: Dictionary = MotionClips.SWINGS.get(character_id, MotionClips.PIG_SWING)
-	var clips := _build_all(swing)
+	var clips := _build_all(
+		swing,
+		MotionClips.WEAPON_STRIKES.get(weapon, {}),
+		MotionClips.ALT_SWINGS.get(character_id, {})
+	)
 
 	var track_root := _track_prefix(player, skeleton)
 	if track_root == "":
@@ -202,18 +206,27 @@ static func _forge_gait(
 
 
 ## 每支動畫的關鍵影格：{片段名: [{"time": 秒, "pose": {骨名: 角度}}, …]}
-static func _build_all(swing: Dictionary) -> Dictionary:
+##
+## `profile` 是這把武器的 `WEAPON_STRIKES`：三段的幅度／鏡像／換姿勢、收招過衝倍率
+## 都從它來。沒有的話退回 `COMBO_SHAPE`（劍的那一套）。`alternates` 是這隻角色的
+## 換姿勢表（第三段拉滿、過頂重砍）。
+static func _build_all(
+	swing: Dictionary, profile: Dictionary, alternates: Dictionary
+) -> Dictionary:
 	var out: Dictionary = {}
-	for index in MotionClips.COMBO_SHAPE.size():
-		var shape: Dictionary = MotionClips.COMBO_SHAPE[index]
+	var combo: Array = profile.get("combo", MotionClips.COMBO_SHAPE)
+	var follow := float(profile.get("follow", MotionClips.FOLLOW_FACTOR))
+	for index in combo.size():
+		var shape: Dictionary = combo[index]
+		var pose: Dictionary = alternates.get(shape.get("swing", &""), swing)
 		out[StringName("attack%d" % (index + 1))] = _swing_keys(
-			CombatSpec.step(index), swing, shape
+			CombatSpec.step(index), pose, shape, follow
 		)
 	out[&"attack_dash"] = _swing_keys(
-		CombatSpec.DASH_ATTACK, swing, MotionClips.DASH_SHAPE
+		CombatSpec.DASH_ATTACK, swing, MotionClips.DASH_SHAPE, follow
 	)
 	out[&"attack_air"] = _swing_keys(
-		CombatSpec.AIR_ATTACK, swing, MotionClips.AIR_SHAPE
+		CombatSpec.AIR_ATTACK, swing, MotionClips.AIR_SHAPE, follow
 	)
 	# 非攻擊的動作各自寫明時長，不再借 CombatSpec.step(0)。
 	#
@@ -226,7 +239,9 @@ static func _build_all(swing: Dictionary) -> Dictionary:
 
 
 ## 把一次揮擊展開成關鍵影格。時間點全部由 spec 決定。
-static func _swing_keys(spec: Dictionary, swing: Dictionary, shape: Dictionary) -> Array:
+static func _swing_keys(
+	spec: Dictionary, swing: Dictionary, shape: Dictionary, follow_factor: float
+) -> Array:
 	var windup := float(spec.get("windup", 0.08))
 	var active := float(spec.get("active", 0.08))
 	var recovery := float(spec.get("recovery", 0.16))
@@ -249,7 +264,7 @@ static func _swing_keys(spec: Dictionary, swing: Dictionary, shape: Dictionary) 
 	]
 	# 每一招都收過頭再回正。**沒有這一格的話輕擊是「啄一下」**——出手完直接滑回
 	# 中性，沒有慣性。重擊與衝刺撞擊收得更過（settle）。
-	var follow := SETTLE_FACTOR if bool(shape.get("settle", false)) else MotionClips.FOLLOW_FACTOR
+	var follow := SETTLE_FACTOR if bool(shape.get("settle", false)) else follow_factor
 	keys.append({
 		"time": windup + active + recovery * MotionClips.FOLLOW_AT,
 		"pose": MotionClips.scaled(impact, follow),

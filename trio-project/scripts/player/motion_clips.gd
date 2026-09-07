@@ -448,6 +448,51 @@ const SPRINT_LEAN := {
 const SPRINT_ARM_SWING := 1.15
 
 
+## 貓的第三發：拉滿。左臂再抬、右手拉到耳後、上身後仰——跟前兩發的快抽快放
+## 分得開，收招時弓才會「放下來」而不是一直舉著。
+const CAT_FULL_DRAW := {
+	"windup": {
+		&"Spine": Vector3(10.0, -26.0, 0.0),
+		&"Chest": Vector3(6.0, -14.0, 0.0),
+		&"Head": Vector3(-4.0, 18.0, 0.0),
+		&"LeftUpperArm": Vector3(-96.0, 0.0, -70.0),
+		&"RightUpperArm": Vector3(-72.0, 0.0, 44.0),
+		&"LeftLowerArm": Vector3(-4.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-118.0, 0.0, 0.0),
+	},
+	"impact": {
+		&"Spine": Vector3(-4.0, 4.0, 0.0),
+		&"Chest": Vector3(-4.0, 2.0, 0.0),
+		&"Head": Vector3(2.0, -2.0, 0.0),
+		&"LeftUpperArm": Vector3(-92.0, 0.0, -72.0),
+		&"RightUpperArm": Vector3(-46.0, 0.0, 52.0),
+		&"LeftLowerArm": Vector3(-2.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-24.0, 0.0, 0.0),
+	},
+}
+
+## 蛙的第三下：過頂重砍。雙手舉過頭再壓下去，跟前兩下的前推分得開。
+const FROG_SLAM := {
+	"windup": {
+		&"Spine": Vector3(16.0, 0.0, 0.0),
+		&"Chest": Vector3(10.0, 0.0, 0.0),
+		&"Head": Vector3(6.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-150.0, 0.0, -10.0),
+		&"RightUpperArm": Vector3(-150.0, 0.0, 62.0),
+		&"LeftLowerArm": Vector3(-30.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-30.0, 0.0, 0.0),
+	},
+	"impact": {
+		&"Spine": Vector3(-34.0, 0.0, 0.0),
+		&"Chest": Vector3(-18.0, 0.0, 0.0),
+		&"Head": Vector3(-8.0, 0.0, 0.0),
+		&"LeftUpperArm": Vector3(-60.0, 0.0, -14.0),
+		&"RightUpperArm": Vector3(-60.0, 0.0, 66.0),
+		&"LeftLowerArm": Vector3(-10.0, 0.0, 0.0),
+		&"RightLowerArm": Vector3(-10.0, 0.0, 0.0),
+	},
+}
+
 ## 每隻角色的出手姿勢。之後多一隻角色就多一組，不必動 motion_forge.gd。
 const SWINGS := {
 	&"pig_warrior": PIG_SWING,
@@ -465,7 +510,71 @@ const FOLLOW_AT := 0.35
 const FOLLOW_FACTOR := -0.15
 
 
-## 連擊每一段的幅度倍率與鏡像。
+## 第三段換姿勢用的：{角色: {名字: 姿勢}}。`WEAPON_STRIKES` 的 combo 用 `swing`
+## 指到這裡的名字；沒指就用 `SWINGS` 那一組。
+const ALT_SWINGS := {
+	&"cat_archer": {&"full_draw": CAT_FULL_DRAW},
+	&"frog_mage": {&"slam": FROG_SLAM},
+}
+
+## **拿什麼武器就怎麼打。** 用武器種類當鍵，不用角色——跟 `WeaponRack.OFF_GRIPS`
+## 同一個道理：怎麼打是武器的性質。
+##
+## 之前三隻共用一套重心（往前撲）、一套收招過衝、一套連擊鏡像：弓手放箭跟劍一樣
+## 往前撲，第二發鏡像到另一隻手——弓在左手，等於換手拉弓。這裡逐武器：
+##
+##   load   蓄力時髖的位移（角色空間，公尺；面向 −Z）
+##   hit    出手那一刻的位移
+##   over   收招過衝
+##   follow 手臂收招過衝的倍率（`motion_forge._swing_keys()`）
+##   combo  三段的幅度／鏡像／settle，可帶 swing 指到 ALT_SWINGS 換姿勢
+##   start_sfx / impact_sfx  起手與出手那一刻的聲音（沒有就不出聲）
+##
+##   劍：抬起來再劈下去——蓄力往上，出手往下比往前多。
+##   弓：踩穩、放箭、後座——不往前撲；收招幾乎不過衝（放手之後手臂留著）。
+##   杖：弓步前推——往前最多、下沉最少。
+const WEAPON_STRIKES := {
+	&"sword": {
+		"load": Vector3(0.0, 0.02, 0.03),
+		"hit": Vector3(0.0, -0.06, -0.05),
+		"over": Vector3(0.0, 0.0, 0.02),
+		"follow": -0.20,
+		"start_sfx": &"whoosh",
+		"combo": [
+			{"scale": 1.0, "mirror": 1.0, "settle": false},
+			{"scale": 0.95, "mirror": -1.0, "settle": false},
+			{"scale": 1.35, "mirror": 1.0, "settle": true},
+		],
+	},
+	&"bow": {
+		"load": Vector3(0.0, -0.02, 0.0),
+		"hit": Vector3(0.0, 0.0, 0.015),
+		"over": Vector3.ZERO,
+		"follow": -0.05,
+		"impact_sfx": &"twang",
+		"combo": [
+			{"scale": 0.85, "mirror": 1.0, "settle": false},
+			{"scale": 1.0, "mirror": 1.0, "settle": false},
+			{"scale": 1.3, "mirror": 1.0, "settle": true, "swing": &"full_draw"},
+		],
+	},
+	&"staff": {
+		"load": Vector3(0.0, 0.0, 0.04),
+		"hit": Vector3(0.0, -0.02, -0.10),
+		"over": Vector3(0.0, 0.0, 0.03),
+		"follow": -0.15,
+		"impact_sfx": &"cast",
+		"combo": [
+			{"scale": 0.9, "mirror": 1.0, "settle": false},
+			{"scale": 1.05, "mirror": 1.0, "settle": false},
+			{"scale": 1.4, "mirror": 1.0, "settle": true, "swing": &"slam"},
+		],
+	},
+}
+
+
+## 連擊每一段的幅度倍率與鏡像。**沒有武器資料時的預設**（`WEAPON_STRIKES` 有的話
+## 用那邊的）。
 ##
 ## 第二段鏡像過來（mirror = -1），左右交替看起來才像連擊而不是同一招播兩次；
 ## 第三段是重擊，幅度放大，而且它的 recovery 有 0.32 秒——夠長，可以讓收招

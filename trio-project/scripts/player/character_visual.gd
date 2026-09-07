@@ -84,6 +84,11 @@ const SPEED_SCALE_RANGE := Vector2(0.6, 5.6)
 ## 低於這個速度算站著不動。
 const IDLE_SPEED := 0.15
 
+## 法杖的球出手時閃多亮、多久回來。基準值是 `Palette` 給 `goal` 的 1.4。
+const ORB_GLOW_BASE := 1.4
+const ORB_GLOW_PEAK := 6.0
+const ORB_FLARE_TIME := 0.25
+
 ## 模型實際高度與名冊身高容許的落差。超過就在程式裡縮放補救。
 const SIZE_TOLERANCE := 0.25
 
@@ -117,6 +122,13 @@ var _action: StringName = &""
 ## 留在原地、腿彎成弓步，那才是「腿有動」。跳躍、受擊、倒下維持關掉——跳躍有
 ## 自己的腿，倒下是整個節點在轉，世界座標的鎖會把腿拉爛。
 var _attacking := false
+
+## 這隻拿的是哪一把（`WeaponRack.kind_of()`）。動作、重心、聲音都逐武器。
+var _weapon_kind: StringName = &""
+
+## 法杖的球與它的材質（逐角色複製過的那一份），出手那一刻閃一下。
+var _orb: MeshInstance3D = null
+var _orb_flare := 0.0
 
 ## 邏輯名稱 -> 模型裡真正的動畫名稱。
 var _clips: Dictionary = {}
@@ -180,8 +192,11 @@ func load_character(id: StringName) -> bool:
 	# 順序反了的話 _cache_materials() 走不到武器的網格，結果是武器沒有描邊、
 	# 而且打到人的時候身體閃白、武器不閃——像貼在角色身上的一張紙。
 	_find_skeleton()
+	_weapon_kind = WeaponRack.kind_of(entry)
 	WeaponRack.attach(_skeleton, entry, _measure_height())
 	_cache_materials(bool(entry.get("alpha", false)))
+	if _skeleton != null:
+		_orb = _skeleton.find_child("orb", true, false) as MeshInstance3D
 	_attach_pose(entry)
 	_fix_cull_bounds(float(entry.get("height", 1.8)))
 	# 布娃娃排在程序化姿態之後：模擬開著的時候要由它說了算（TD-06）。
@@ -203,7 +218,7 @@ func load_character(id: StringName) -> bool:
 	# 生成的戰鬥動畫要在查表之前掛上去，這樣它們以精確名稱勝出；
 	# 之後美術補進來的 idle/walk/run 仍然走關鍵字比對（TD-12）。
 	if _skeleton != null:
-		var forged := MotionForge.attach(_player, _skeleton, self, id)
+		var forged := MotionForge.attach(_player, _skeleton, self, id, _weapon_kind)
 		if forged == 0:
 			push_warning("[Visual] %s 沒建出任何生成動畫" % id)
 	_resolve_clips()
@@ -558,6 +573,20 @@ func _process(delta: float) -> void:
 			_player.speed_scale = 0.0 if _freeze_timer > 0.0 else 1.0
 	_tick_punch(delta)
 	_tick_pivot(delta)
+	_tick_orb(delta)
+
+
+## 球的閃光：自發光從基準值跳到峰值再用 0.25 秒回來。材質是逐角色複製過的
+## （`_cache_materials()`），所以不會三隻一起閃。
+func _tick_orb(delta: float) -> void:
+	if _orb == null or _orb_flare <= 0.0:
+		return
+	_orb_flare = maxf(_orb_flare - delta / ORB_FLARE_TIME, 0.0)
+	var material := _orb.get_surface_override_material(0) as StandardMaterial3D
+	if material != null:
+		material.emission_energy_multiplier = lerpf(
+			ORB_GLOW_BASE, ORB_GLOW_PEAK, _orb_flare * _orb_flare
+		)
 
 
 ## 把當下的轉向角速度餵給姿態層，讓它往內側傾（ProceduralPose 的第七層）。
@@ -883,8 +912,10 @@ func play_action(logical: StringName) -> bool:
 		_pose.set_acting(true)
 	if _attacking:
 		var spec := _action_spec(logical)
+		var profile: Dictionary = MotionClips.WEAPON_STRIKES.get(_weapon_kind, {})
 		if _gait_bob != null:
-			_gait_bob.strike(spec, _action_scale(logical))
+			_gait_bob.strike(spec, profile, _action_scale(logical))
+		_impact_after(float(spec.get("windup", 0.08)), profile)
 		# 兩腳釘住整招：髖往前壓時腳留在原地，腿才會彎成弓步。
 		if _foot_ik != null:
 			_foot_ik.pin(
@@ -893,6 +924,35 @@ func play_action(logical: StringName) -> bool:
 				+ float(spec.get("recovery", 0.16))
 			)
 	return true
+
+
+## 出手那一刻：武器自己的反應。時間就是 spec 的 windup，跟片段與髖的衝量同源。
+##
+## `play_action()` 在每一端都會被叫到（`PlayerCharacter._play_swing` 的 rpc），所以
+## 三台機器都看得到球閃、聽得到弦響。箭痕不在這裡——弓弦自己從拉開的距離判放手。
+## 頓幀（`freeze()`）停的是動畫，不停這個計時器；出手那一刻正好是頓幀開始，
+## 球在頓幀期間亮著反而是對的。
+func _impact_after(seconds: float, profile: Dictionary) -> void:
+	await get_tree().create_timer(seconds).timeout
+	if not is_inside_tree():
+		return
+	var sfx: StringName = profile.get("impact_sfx", &"")
+	if sfx != &"":
+		Sfx.play(sfx, global_position)
+	if _weapon_kind == &"staff" and _orb != null:
+		_orb_flare = 1.0
+		Vfx.burst(&"cast_flare", _orb.global_position)
+
+
+## 起手時該放哪個聲音（劍的揮空音）。沒有就不出聲——弓與杖的聲音在出手那一刻。
+func swing_sfx() -> StringName:
+	return (MotionClips.WEAPON_STRIKES.get(_weapon_kind, {}) as Dictionary).get(
+		"start_sfx", &"whoosh"
+	)
+
+
+func weapon_kind() -> StringName:
+	return _weapon_kind
 
 
 ## 這一招的相位時間，**跟 `MotionForge` 建片段時用的是同一筆**，所以髖的衝量與

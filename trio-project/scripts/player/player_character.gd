@@ -519,8 +519,11 @@ func on_attack_started(spec: Dictionary) -> void:
 @rpc("any_peer", "call_remote", "unreliable")
 func _play_swing(clip: StringName, heavy: bool) -> void:
 	_character.play_action(clip)
-	# 第三段是重擊，音調壓低一點，聽得出來跟前兩段不同。
-	Sfx.play(&"whoosh", global_position, 0.85 if heavy else 1.0)
+	# 起手的聲音逐武器：劍是揮空音，弓與杖起手不出聲——弦響與咒音在出手那一刻
+	# 由 `CharacterVisual` 放。第三段是重擊，音調壓低一點，聽得出來跟前兩段不同。
+	var sfx := _character.swing_sfx()
+	if sfx != &"":
+		Sfx.play(sfx, global_position, 0.85 if heavy else 1.0)
 
 
 ## 命中回饋在本機立刻生效，不等 host——回饋速度優先（docs/05）。

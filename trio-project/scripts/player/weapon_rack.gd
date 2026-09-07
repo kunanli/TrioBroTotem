@@ -80,6 +80,12 @@ const BOW := [
 		"color": &"path_edge", "part": &"string_upper"},
 	{"shape": &"box", "size": Vector3(0.017, 0.515, 0.017), "at": Vector3(0, -0.258, -0.164),
 		"color": &"path_edge", "part": &"string_lower"},
+	# 箭：搭在弦上、指向弓的前方（+Z）。**平時隱藏**，拉弓時才由 `bow_string.gd` 顯示、
+	# 放手時隱藏並放一道箭痕。沒有箭的話拉弓再好看也像在拉空氣。
+	{"shape": &"box", "size": Vector3(0.012, 0.62, 0.012), "at": Vector3(0, 0, 0.146),
+		"spin": Vector3(90.0, 0, 0), "color": &"wood", "part": &"arrow", "hidden": true},
+	{"shape": &"prism", "size": Vector3(0.03, 0.06, 0.012), "at": Vector3(0, 0, 0.486),
+		"spin": Vector3(90.0, 0, 0), "color": &"stone", "part": &"arrow_head", "hidden": true},
 ]
 
 ## 弓弦兩端固定在哪、以及靜止時搭箭點在哪（武器自己的座標）。
@@ -104,7 +110,9 @@ const STAFF := [
 		"color": &"wood"},
 	{"shape": &"box", "size": Vector3(0.090, 0.062, 0.090), "at": Vector3(0, 0.835, 0),
 		"color": &"stone"},
-	{"shape": &"sphere", "size": 0.105, "at": Vector3(0, 0.940, 0), "color": &"goal"},
+	# 球有名字：出手那一刻 `CharacterVisual` 會讓它閃一下。
+	{"shape": &"sphere", "size": 0.105, "at": Vector3(0, 0.940, 0), "color": &"goal",
+		"part": &"orb"},
 ]
 
 const SHAPES := {&"sword": SWORD, &"bow": BOW, &"staff": STAFF}
@@ -127,6 +135,15 @@ const OFF_GRIPS := {
 	&"staff": Vector3(0.0, 0.38, 0.0),
 	&"bow": Vector3(0.0, 0.0, -0.164),
 }
+
+
+## 這隻角色拿的是哪一把（名冊第一把武器的 kind）。動作與重心是逐武器的
+## （`MotionClips.WEAPON_STRIKES`），要靠這個查。
+static func kind_of(entry: Dictionary) -> StringName:
+	var weapons: Array = entry.get("weapons", [])
+	if weapons.is_empty():
+		return &""
+	return (weapons[0] as Dictionary).get("kind", &"")
 
 
 ## 把名冊裡寫的武器全部掛上去，回傳掛成功幾把。
@@ -257,6 +274,7 @@ static func _part(spec: Dictionary) -> MeshInstance3D:
 	# 零件表中間插一個東西，索引就全錯了，而那種錯是靜默的。
 	if spec.has("part"):
 		node.name = String(spec["part"])
+	node.visible = not bool(spec.get("hidden", false))
 	node.mesh = _mesh(spec)
 	# 用 surface override 而不是 material_override：CharacterVisual._cache_materials()
 	# 是逐 surface 在複製材質、掛描邊（TD-09 的 inverted hull）、以及登記命中白閃的。

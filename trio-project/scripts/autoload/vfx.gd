@@ -120,6 +120,19 @@ func _build_presets() -> void:
 	})
 	# 腳步的小揚塵。跟落地同一個色系但小得多——這個一秒會冒好幾次，
 	# 大一點就會變成角色拖著一團霧在走。
+	# 箭痕：三顆細長的加色粒子順著弓的前方射出去，兩公尺內熄掉。速度乘壽命就是
+	# 判定球的距離——它不是投射物，只是讓放箭看得見。
+	_presets[&"arrow_streak"] = _preset({
+		"amount": 3, "lifetime": 0.12, "spread": 2.0, "gravity": Vector3.ZERO,
+		"speed_min": 16.0, "speed_max": 20.0, "damping": 0.0, "size": 0.05,
+		"colors": [Color(1.0, 0.96, 0.8), Color(1.0, 0.85, 0.5, 0.0)], "additive": true,
+	})
+	# 施法的閃光：從法杖的球慢慢散開的一圈金色，配合球本身的自發光脈衝。
+	_presets[&"cast_flare"] = _preset({
+		"amount": 8, "lifetime": 0.30, "spread": 180.0, "gravity": Vector3.ZERO,
+		"speed_min": 0.8, "speed_max": 1.6, "damping": 3.0, "size": 0.10,
+		"colors": [Color(1.0, 0.86, 0.35), Color(1.0, 0.7, 0.2, 0.0)], "additive": true,
+	})
 	_presets[&"step_puff"] = _preset({
 		"amount": 3, "lifetime": 0.22, "spread": 60.0, "gravity": Vector3(0.0, 0.4, 0.0),
 		"speed_min": 0.5, "speed_max": 1.2, "damping": 4.0, "size": 0.09,
