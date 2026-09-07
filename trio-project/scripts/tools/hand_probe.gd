@@ -2,8 +2,15 @@ extends Node3D
 
 ## 手部量尺：武器現在甩多少，副手離武器多遠。
 ##
-##     godot --headless --path trio-project res://scenes/tools/hand_probe.tscn
-##     godot --headless --path trio-project res://scenes/tools/hand_probe.tscn --ik=0
+##     godot --headless --fixed-fps 120 --path trio-project res://scenes/tools/hand_probe.tscn
+##     godot --headless --fixed-fps 120 --path trio-project \
+##           res://scenes/tools/hand_probe.tscn --ik=0        # 關掉手部 IK 當對照組
+##
+## **一定要 `--fixed-fps 120`。** 探針自己用固定步長推位移與動畫，但修改器堆疊吃的
+## `delta` 是真實幀的——headless 一幀可能只有一兩毫秒，所有淡入淡出（鎖腳、手部
+## IK、起伏）都會用慢幾十倍的速度跑，量到的是假的。第一版 `[Strike]` 就是這樣
+## 量到「腳滑 8 公分、手臂沒有回來」，其中一半是這個。鎖住之後每一幀的 delta
+## 正好是 1/120 秒，跟 `STEP` 一致。
 ##
 ## 兩張成績單：
 ##
@@ -13,6 +20,10 @@ extends Node3D
 ##   副手距離   副手離「應該握住的那一點」多遠（`WeaponRack.OFF_GRIPS`）。
 ##              同時是可達性檢查：**最大值超過臂長就表示姿勢沒把手帶到位**，
 ##              那時候 IK 只會把手臂拉直，不會把手接上去。
+##
+## 第三張成績單 `[Strike]`：播一次 `attack1`，髖往前、往下壓了幾公分（攻擊有沒有
+## 全身參與）、攻擊期間承重腳滑了幾公分（鎖腳在攻擊期間開著的代價）、以及手臂從
+## 出招算起多久回到待機 2° 以內（回招有沒有滑）。`--bob=0` 關掉起伏層當對照組。
 ##
 ## 另外印兩個數字：武器離 `Head` 骨頭多近（**身高的幾成**），以及副手臂長。
 ##
@@ -51,6 +62,11 @@ const WARMUP_SECONDS := 1.0
 ## 而且副手接不接得上，看待機最直接。**定案的數字一律用完整那一輪。**
 ## 武器離頭至少要有身高的這個比例。校準方式見檔頭——這是煙霧偵測器。
 const HEAD_CLEAR := 0.30
+
+## `[Strike]` 播完攻擊之後再看多久（回招要在這裡面回到待機）、以及「回到待機」
+## 的角度門檻。
+const STRIKE_WATCH := 1.2
+const STRIKE_SETTLED := 3.0
 
 const QUICK_SAMPLE := 0.3
 const QUICK_WARMUP := 0.6
@@ -96,10 +112,12 @@ class Sampler:
 
 
 var _quick := false
+var _with_bob := true
 
 
 func _ready() -> void:
 	var with_ik := _argument("--ik=") != "0"
+	_with_bob = _argument("--bob=") != "0"
 	_quick = _has_flag("--quick")
 	print(
 		"\n手部 IK：%s%s"
@@ -161,6 +179,9 @@ func _report(visual: CharacterVisual, with_ik: bool) -> void:
 	var ik := skeleton.get_node_or_null("HandIk") as SkeletonModifier3D
 	if ik != null:
 		ik.active = with_ik
+	var bob := skeleton.get_node_or_null("GaitBob") as GaitBob
+	if bob != null:
+		bob.active = _with_bob
 	var sampler := Sampler.new()
 	sampler.name = "HandSampler"
 	sampler.hand = hand
@@ -190,6 +211,8 @@ func _report(visual: CharacterVisual, with_ik: bool) -> void:
 			"height": _skeleton_height(skeleton),
 		})
 	sampler.queue_free()
+	if not _quick:
+		await _measure_strike(visual, player, skeleton, hand)
 
 
 ## 一個速度帶的四個數字。全部換算到**角色空間**——角色本身在往前走，
@@ -279,6 +302,80 @@ func _measure(
 			),
 		]
 	)
+
+
+## 出招：髖壓了多少、腳滑了多少、手臂多久回來。
+func _measure_strike(
+	visual: CharacterVisual, player: AnimationPlayer, skeleton: Skeleton3D, hand: int
+) -> void:
+	var hips := skeleton.find_bone("Hips")
+	var feet := LimbIk.find_chain(skeleton, ["LeftFoot", "RightFoot"])
+	if hips < 0 or feet.is_empty():
+		return
+	var sampler := Sampler.new()
+	sampler.name = "StrikeSampler"
+	sampler.hand = hand
+	sampler.others = [hips, feet[0], feet[1]]
+	skeleton.add_child(sampler)
+	# 呼吸與擺動關掉：「回到待機」要跟一個不動的基準比，而待機現在會呼吸
+	# （2–3.6 度，比門檻還大），不關的話永遠量到「沒有回來」。
+	var pose := skeleton.get_node_or_null("ProceduralPose") as ProceduralPose
+	if pose != null:
+		pose.breath_amplitude = 0.0
+		pose.sway_amplitude = 0.0
+	visual.position = Vector3.ZERO
+	for _warm in int(WARMUP_SECONDS / STEP):
+		await _advance(visual, player, 0.0)
+	var rest_hips := _space_point(visual, skeleton, sampler.seen[0])
+	var rest_feet: Array[Vector3] = [
+		_space_point(visual, skeleton, sampler.seen[1]),
+		_space_point(visual, skeleton, sampler.seen[2]),
+	]
+	var rest_axis := _weapon_axis(visual, skeleton, sampler.hand_pose)
+
+	visual.play_action(&"attack1")
+	var clip_length := player.get_animation(player.current_animation).length
+	var forward := 0.0
+	var down := 0.0
+	var slip := 0.0
+	var settled := -1.0
+	var t := 0.0
+	while t < clip_length + STRIKE_WATCH:
+		await _advance(visual, player, 0.0)
+		t += STEP
+		var here := _space_point(visual, skeleton, sampler.seen[0])
+		forward = maxf(forward, rest_hips.z - here.z)  # 面向 −Z，往前是 z 變小
+		down = maxf(down, rest_hips.y - here.y)
+		for side in 2:
+			var foot := _space_point(visual, skeleton, sampler.seen[1 + side])
+			slip = maxf(slip, Vector2(foot.x - rest_feet[side].x, foot.z - rest_feet[side].z).length())
+		var apart := rad_to_deg(_weapon_axis(visual, skeleton, sampler.hand_pose).angle_to(rest_axis))
+		if t > clip_length and apart <= STRIKE_SETTLED and settled < 0.0:
+			settled = t
+		elif apart > STRIKE_SETTLED:
+			settled = -1.0
+	sampler.queue_free()
+	print(
+		"  [Strike] attack1 %.2fs → 髖往前 %.1f cm　往下 %.1f cm　腳滑 %.1f cm　手臂回到待機 %s"
+		% [
+			clip_length,
+			forward * 100.0,
+			down * 100.0,
+			slip * 100.0,
+			("%.2fs（從出招算起）" % settled) if settled >= 0.0 else "**沒有回來**",
+		]
+	)
+
+
+## 武器指的方向（角色空間）。武器掛在手骨的 −Y 上（`weapon_rack.gd` 的 GRIP_SPIN）。
+func _weapon_axis(visual: CharacterVisual, skeleton: Skeleton3D, hand: Transform3D) -> Vector3:
+	var to_space := (visual.global_transform.affine_inverse() * skeleton.global_transform).basis
+	return -(to_space * hand.basis.y)
+
+
+## 取樣器記下的骨架空間的點 → 角色空間。
+func _space_point(visual: CharacterVisual, skeleton: Skeleton3D, point: Vector3) -> Vector3:
+	return visual.global_transform.affine_inverse() * (skeleton.global_transform * point)
 
 
 ## 前進一個固定步長，餵一次 drive()，推動畫，然後等真的一幀讓修改器跑。

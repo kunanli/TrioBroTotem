@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """角色動畫展示：把 animation_lab 逐幀拍下來，疊成一張 GIF 與一張聯絡表。
 
-    python3 tools/shoot_anim.py                    # 全套（15 fps、整輪播完）
+    python3 tools/shoot_anim.py                    # 全套（30 fps、整輪播完）
     python3 tools/shoot_anim.py --seconds 6        # 只拍前六秒
     python3 tools/shoot_anim.py --width 960        # 換解析度
     python3 tools/shoot_anim.py --orbit --seconds 8   # 鏡頭繞著轉（檔案大很多）
@@ -43,17 +43,21 @@ SCENE = "res://scenes/tools/animation_lab.tscn"
 ## 這裡多留一點，寧可多拍幾幀也不要在最後一支動作播到一半就停。
 ## 加了 SPRINT 那一段之後整輪變長了，這個數字要跟著 PLAYLIST 走。
 DEFAULT_SECONDS = 24.0
-DEFAULT_FPS = 15
+DEFAULT_FPS = 30
 
 ## 聯絡表的格子數。4×4 剛好夠涵蓋一整輪的十三段。
 CONTACT_COLUMNS = 4
 CONTACT_ROWS = 4
 
-## GIF 的上限。**PNG 逐幀是全解析度的，只有 GIF 會被降下來**——聯絡表與
-## 單張細看都吃原圖，而 GIF 的用途是「傳給看不到專案的人」，傳不出去就沒用。
-## 720 寬、15 fps、21 秒的原始素材直接疊出來是 18.6 MB；降到這裡是幾 MB。
+## GIF 的上限。**PNG 逐幀是全解析度的，只有 GIF 會被降寬**——聯絡表與單張細看
+## 都吃原圖，而 GIF 的用途是「傳給看不到專案的人」，傳不出去就沒用。
+##
+## fps 的上限曾經是 12，理由是檔案大小。後來改成 30，理由是**攻擊要看得到**：
+## 輕擊整支只有 0.32 秒，12 fps 的 GIF 裡是四格，出手就是「啄一下」；而且拍 30 fps
+## 也救不了它——`round(30 / 12) = 2` 會把它抽回 15。檔案大約翻倍（24 秒約 30 MB），
+## 傳不出去就縮秒數，不要縮 fps。
 GIF_MAX_WIDTH = 560
-GIF_MAX_FPS = 12
+GIF_MAX_FPS = 30
 
 
 def find_godot() -> str:

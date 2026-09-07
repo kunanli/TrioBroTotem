@@ -13,9 +13,9 @@ extends RefCounted
 
 const LIBRARY_NAME := &"forged"
 
-## 收招時多插一格「站不穩」的中間點。只有 recovery 夠長的招式用得上
-## （見 MotionClips.COMBO_SHAPE 的 settle）。
-const SETTLE_AT := 0.45
+## 收招收過頭的倍率——`settle` 的招式（重擊、衝刺撞擊）用這個，比
+## `MotionClips.FOLLOW_FACTOR` 大，收招時會多一個「站不穩」的感覺。時間點共用
+## `MotionClips.FOLLOW_AT`。
 const SETTLE_FACTOR := -0.18
 
 ## 不屬於攻擊的生成動畫：自己的時長 ＋ 自己的姿勢資料。
@@ -247,11 +247,13 @@ static func _swing_keys(spec: Dictionary, swing: Dictionary, shape: Dictionary) 
 		{"time": windup, "pose": impact},
 		{"time": windup + active, "pose": MotionClips.scaled(impact, 0.9)},
 	]
-	if bool(shape.get("settle", false)) and recovery > 0.2:
-		keys.append({
-			"time": windup + active + recovery * SETTLE_AT,
-			"pose": MotionClips.scaled(impact, SETTLE_FACTOR),
-		})
+	# 每一招都收過頭再回正。**沒有這一格的話輕擊是「啄一下」**——出手完直接滑回
+	# 中性，沒有慣性。重擊與衝刺撞擊收得更過（settle）。
+	var follow := SETTLE_FACTOR if bool(shape.get("settle", false)) else MotionClips.FOLLOW_FACTOR
+	keys.append({
+		"time": windup + active + recovery * MotionClips.FOLLOW_AT,
+		"pose": MotionClips.scaled(impact, follow),
+	})
 	keys.append({"time": windup + active + recovery, "pose": {}})
 	return keys
 

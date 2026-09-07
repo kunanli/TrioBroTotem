@@ -24,7 +24,7 @@ extends RefCounted
 ##
 ## 量法與重新量的方式：
 ##
-##     godot --headless --path trio-project res://scenes/tools/gait_probe.tscn
+##     godot --headless --fixed-fps 120 --path trio-project res://scenes/tools/gait_probe.tscn
 ##
 ## 站立期的腳不該滑，所以「腳相對身體往後退多快」就等於「身體該以多快前進」。
 ## 探針逐格取兩隻腳之中往後退得最快的那一個，再取整個循環的中位數——

@@ -64,6 +64,22 @@ const SHIFT_TIME := 0.6
 const FADE_TIME := 0.12
 const BAND_TIME := 0.3
 
+## 出招時髖怎麼走（角色空間，公尺；角色面向 −Z，所以往前是負的 Z）。
+##
+## 生成的攻擊片段只有手臂與脊椎的旋轉軌——髖、腿、腳從頭到尾不動，上半身在一尊
+## 不動的下半身上揮手。這裡補的是重心：蓄力時往後拉開，出手那一刻壓上去（往前
+## 往下），收招收過頭再站定。**時間軸就是 CombatSpec 那一筆**（`strike()` 收的
+## `spec`），跟片段同源，不會有第二個時鐘；髖往前壓時 `FootIk` 把兩腳留在原地，
+## 腿才會彎成弓步——那才是「腿有動」。
+const STRIKE_BACK := 0.03
+const STRIKE_FORWARD := 0.08
+const STRIKE_DOWN := 0.04
+const STRIKE_OVERSHOOT := 0.02
+## 蓄力在前搖的這個比例到位（與 `motion_forge._swing_keys()` 的 0.85 一致），
+## 過衝在後搖的這個比例（與 `MotionClips.FOLLOW_AT` 一致）。
+const STRIKE_LOAD_AT := 0.85
+const STRIKE_OVERSHOOT_AT := 0.35
+
 ## 這一幀髖被壓低了多少（角色空間，公尺；往上抬時是負的）。`FootIk` 讀它，
 ## 把踏地的腳撐回去**剛好這麼多**——不多不少。多了會把動畫本身的腳往下踩
 ## 也一併撐起來，reach clamp 一介入水平的鎖就跟著丟了（實測貓的腳滑從 5% 惡化
@@ -92,6 +108,10 @@ var _drop_seen := false
 var _head_yaw := 0.0
 var _head_seen := false
 
+## 出招衝量的關鍵點：[時間, 位移]，由 `strike()` 從 spec 建。空的就是沒在出招。
+var _strike_keys: Array = []
+var _strike_time := 0.0
+
 var _rng := RandomNumberGenerator.new()
 var _shift_side := 1.0
 var _shift_timer := 0.0
@@ -104,6 +124,24 @@ func configure(owner_space: Node3D, seed_name: String) -> void:
 	_space = owner_space
 	_rng.seed = hash(seed_name)
 	_shift_timer = _rng.randf_range(SHIFT_EVERY.x, SHIFT_EVERY.y)
+
+
+## 出招。`spec` 是 `CombatSpec` 的那一筆（windup／active／recovery，秒），
+## `scale` 是 `MotionClips.COMBO_SHAPE` 的幅度倍率（重擊更大）。
+func strike(spec: Dictionary, scale: float) -> void:
+	var windup := float(spec.get("windup", 0.08))
+	var active := float(spec.get("active", 0.08))
+	var recovery := float(spec.get("recovery", 0.16))
+	var hit := windup + active
+	_strike_keys = [
+		[0.0, Vector3.ZERO],
+		[windup * STRIKE_LOAD_AT, Vector3(0.0, 0.0, STRIKE_BACK * scale)],
+		[windup, Vector3(0.0, -STRIKE_DOWN * scale, -STRIKE_FORWARD * scale)],
+		[hit, Vector3(0.0, -STRIKE_DOWN * scale, -STRIKE_FORWARD * scale)],
+		[hit + recovery * STRIKE_OVERSHOOT_AT, Vector3(0.0, 0.0, STRIKE_OVERSHOOT * scale)],
+		[hit + recovery, Vector3.ZERO],
+	]
+	_strike_time = 0.0
 
 
 ## 每幀由 `CharacterVisual.drive()` 餵。
@@ -137,6 +175,7 @@ func _process_modification() -> void:
 		return
 
 	var offset := (_gait_offset(skeleton, delta) if _moving else _shift_offset(delta)) * _weight
+	offset += _strike_offset(delta) * _weight  # 與走路起伏相加：衝刺中出招兩者都要在
 	sink = -offset.y
 	_write_hips(skeleton, offset)
 	if _moving:
@@ -177,6 +216,27 @@ func _shift_offset(delta: float) -> Vector3:
 	_shift = _shift.lerp(wanted, 1.0 - exp(-delta / SHIFT_TIME))
 	_drop_seen = false
 	return _shift
+
+
+## 出招衝量這一幀的位移。關鍵點之間用 smoothstep——出手那一段本來就只有幾格，
+## 線性會像平移，指數會拖。
+func _strike_offset(delta: float) -> Vector3:
+	if _strike_keys.is_empty():
+		return Vector3.ZERO
+	_strike_time += delta
+	var last: Array = _strike_keys[_strike_keys.size() - 1]
+	if _strike_time >= float(last[0]):
+		_strike_keys = []
+		return Vector3.ZERO
+	for index in range(1, _strike_keys.size()):
+		var next: Array = _strike_keys[index]
+		if _strike_time > float(next[0]):
+			continue
+		var here: Array = _strike_keys[index - 1]
+		var span := float(next[0]) - float(here[0])
+		var u := 1.0 if span <= 0.0 else clampf((_strike_time - float(here[0])) / span, 0.0, 1.0)
+		return (here[1] as Vector3).lerp(next[1], smoothstep(0.0, 1.0, u))
+	return Vector3.ZERO
 
 
 ## 把角色空間的位移寫成 Hips 的局部位置：**永遠是 rest + offset**（理由見檔頭）。

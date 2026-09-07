@@ -56,11 +56,30 @@ const FADE_TIME := 0.07
 ## 該回去看 `gait_probe` 而不是把這個數字調大。
 const MAX_DRAG := 0.5
 
-## CCD 迭代幾輪。修正量小，兩輪就夠；第三輪的改善量已經看不出來。
-const PASSES := 2
+## CCD 迭代幾輪。走路的修正量小，兩輪就夠；四輪是為了出招——髖往前壓 8 公分時
+## 兩腳要留在原地，量到的殘差（`hand_probe` 的 `[Strike]` 腳滑）：
+##
+##     兩輪   豬 3.3　蛙 1.1　貓 5.0 公分
+##     四輪   豬 3.2　蛙 0.3　貓 5.0 公分
+##
+## 蛙有差，豬與貓沒有——那兩隻剩下的不是收斂問題，是待機時腿本來就快打直
+## （膝蓋只彎 6–8 度），髖一往前腳就到了腿長的邊界，reach clamp 讓它跟著滑。
+## 要再降就得改待機姿勢讓膝蓋多彎一點，那是另一件事。
+##
+## 走路順便賺到：全速的腳滑 3.8／5.3／5.4% → 3.0／4.4／5.2%（`gait_probe`）。
+const PASSES := 4
 
 var _legs: Array[Dictionary] = []
 var _gait_bob: GaitBob = null
+
+## 出招期間把兩腳釘在原地：還剩幾秒、以及釘下去的那一幀要不要重新記位置。
+##
+## 為什麼不靠踏地判定：判定是給走路用的（比兩腳的世界速度），從待機出招時兩腳
+## 速度都是零、髖一動又同時跳動，判定每一幀都在翻，鎖定點跟著世界座標跑——
+## 實測出招時 `locked == world`、修正量 0，腿沒有彎，整個人平移 8 公分。
+## 攻擊要的本來就不是「判斷哪隻腳踏地」而是「兩腳都別動」，那就明說。
+var _pin_left := 0.0
+var _pin_fresh := false
 var _built := false
 var _locking := false
 var _weight := 0.0
@@ -69,6 +88,13 @@ var _weight := 0.0
 ## 起伏層。踏地的腳要撐回去的量就是它這一幀把髖壓低的量，從它身上讀。
 func follow(gait_bob: GaitBob) -> void:
 	_gait_bob = gait_bob
+
+
+## 出招：接下來這幾秒兩腳都釘在原地，不走踏地判定。由 `CharacterVisual.play_action()`
+## 在攻擊開始時呼叫，時間就是那一招的 windup + active + recovery。
+func pin(seconds: float) -> void:
+	_pin_left = seconds
+	_pin_fresh = true
 
 
 ## 現在該不該鎖腳。由 `CharacterVisual` 每幀餵——離地、倒地、布娃娃、被扛、
@@ -115,15 +141,23 @@ func _process_modification() -> void:
 		lowest = minf(lowest, here.y)
 		slowest = minf(slowest, float(leg["speed"]))
 
+	var pinned := _pin_left > 0.0
+	if pinned:
+		_pin_left -= delta
 	for entry in _legs:
 		var leg: Dictionary = entry
 		var ankle: Vector3 = leg["ankle"]
 		var planted := (
-			float(leg["speed"]) <= slowest
-			and ankle.y <= lowest + float(leg["length"]) * DOUBLE_BAND
+			pinned
+			or (
+				float(leg["speed"]) <= slowest
+				and ankle.y <= lowest + float(leg["length"]) * DOUBLE_BAND
+			)
 		)
 		var world: Vector3 = leg["world"]
-		if planted and not bool(leg["planted"]):
+		# 釘住的第一幀記一次位置（髖那時候還沒動，`GaitBob` 的衝量從 0 起），
+		# 之後整段都不再記——那正是「釘住」的意思。
+		if (planted and not bool(leg["planted"])) or _pin_fresh:
 			leg["locked"] = world
 		leg["planted"] = planted
 		if not planted:
@@ -156,6 +190,7 @@ func _process_modification() -> void:
 			PASSES,
 			float(leg["length"])
 		)
+	_pin_fresh = false
 
 
 ## 找出腿骨並量出腿長。腿長是**靜置**姿勢量的，那是這條腿伸直時的長度。

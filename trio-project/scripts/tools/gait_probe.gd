@@ -2,7 +2,10 @@ extends Node3D
 
 ## 步態量尺：走路片段的真實步幅是多少，以及現在腳滑多少。
 ##
-##     godot --headless --path trio-project res://scenes/tools/gait_probe.tscn
+##     godot --headless --fixed-fps 120 --path trio-project res://scenes/tools/gait_probe.tscn
+##
+## **`--fixed-fps 120` 不能省**：修改器吃的 delta 是真實幀的，headless 一幀只有一兩
+## 毫秒，鎖腳與起伏的淡入淡出會慢幾十倍。理由寫在 hand_probe.gd 的檔頭。
 ##
 ## **這支探針存在的理由**：全專案有三個各自為政的數字在猜同一件事——這支走路
 ## 片段「原本」對應多快的移動速度。`CharacterVisual.WALK_REFERENCE_SPEED`

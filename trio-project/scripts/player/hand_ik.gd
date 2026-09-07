@@ -69,8 +69,20 @@ const STEADY_TIME := 0.35
 ## 就是「武器有慣性、比身體慢半拍」，不必另外做。
 const STEADY_SHARE := 0.6
 
-## 淡入淡出的時間。攻擊開始的那一瞬間不能硬切，會「啪」一下。
+## 淡**入**的時間。淡出是瞬間的——這是量出來才改的：
+##
+## 第一版兩個方向都用 0.09 秒，而輕擊的前搖只有 0.08 秒，等於前搖有四分之一還在
+## 被這一層壓著，出手看起來軟。動作一開始就該把權重歸零，那是動畫該甩的時候；
+## 動作結束再慢慢淡回來，硬切的「啪」只會出現在這一頭。
 const FADE_TIME := 0.09
+
+## 淡入到這個權重之前，平滑要**跟緊**動畫而不是**起算**。
+##
+## 也是量出來的：動作結束時從出招的姿勢重新起算平滑，手臂要 0.42 秒才回到待機
+## 2° 以內，而且是指數尾巴——畫面上就是「啄一下、然後僵在那裡」。跟緊的話回招
+## 完全由片段自己的曲線加 0.15 秒的待機混合決定。0.9 大約是淡入 0.2 秒，混合在那
+## 之前就結束了；改 `FADE_TIME` 要重看這件事。
+const STEADY_LATCH := 0.9
 
 ## 持械手的 CCD 迭代輪數。跟腳一樣，修正量只有幾公分，兩輪就夠。
 const PASSES := 2
@@ -137,7 +149,7 @@ func _process_modification() -> void:
 			return
 
 	var delta := get_process_delta_time()
-	_weight = lerpf(_weight, 1.0 if _steadying else 0.0, 1.0 - exp(-delta / FADE_TIME))
+	_weight = lerpf(_weight, 1.0, 1.0 - exp(-delta / FADE_TIME)) if _steadying else 0.0
 	if _weight < 0.01:
 		# 下次啟用時要從當下的姿勢重新起算，不要用停用前的舊值——不然一恢復
 		# 就會把手從攻擊結束的位置一路拖回來。
@@ -157,7 +169,7 @@ func _process_modification() -> void:
 func _steady_hand(skeleton: Skeleton3D, delta: float) -> void:
 	var hand := int(_hold["hand"])
 	var in_space := _to_space * skeleton.get_bone_global_pose(hand)
-	if not _steady_seen:
+	if not _steady_seen or _weight < STEADY_LATCH:
 		_steady = in_space
 		_steady_seen = true
 	else:

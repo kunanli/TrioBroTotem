@@ -113,6 +113,11 @@ var _ragdoll: PhysicalBoneSimulator3D = null
 var _recovery: RagdollRecovery = null
 var _action: StringName = &""
 
+## 正在播的一次性動作是不是攻擊。攻擊期間鎖腳與起伏層**不關**：髖往前壓時兩腳
+## 留在原地、腿彎成弓步，那才是「腿有動」。跳躍、受擊、倒下維持關掉——跳躍有
+## 自己的腿，倒下是整個節點在轉，世界座標的鎖會把腿拉爛。
+var _attacking := false
+
 ## 邏輯名稱 -> 模型裡真正的動畫名稱。
 var _clips: Dictionary = {}
 
@@ -741,14 +746,17 @@ func drive(speed: float) -> void:
 ##   命中擠壓  `_write_punch()` 對這個節點寫**非等比**縮放，而鎖腳是在世界
 ##             空間算的，被非等比縮放一扭目標點就跑掉了
 ##
-## 站著不動也不鎖：身體沒動，腳本來就不會滑，鎖了只是多花力氣。
+## **站著不動也鎖。** 第一版不鎖（「腳本來就不會滑，鎖了只是多花力氣」），結果
+## 從待機出招時鎖腳的權重從 0 開始淡入，髖往前壓的那 0.07 秒它只到六成，兩腳跟著
+## 髖一起平移了 8 公分——腿沒有彎，攻擊看起來還是整個人在滑。腳靜止時鎖的修正量
+## 本來就是零，一直開著沒有代價；待機的重心轉移反而因此變成「身體在踩穩的腳上
+## 移動」，那才是重心轉移。
 func _drive_foot_ik() -> void:
 	if _foot_ik == null:
 		return
 	_foot_ik.set_locking(
-		_moving
-		and not _airborne
-		and _action == &""
+		not _airborne
+		and (_action == &"" or _attacking)
 		and _freeze_timer <= 0.0
 		and _punch_elapsed >= CombatSpec.PUNCH_TIME
 		and (_ragdoll == null or not _ragdoll.active)
@@ -791,7 +799,7 @@ func _drive_gait_bob() -> void:
 	_gait_bob.set_state(
 		not _airborne
 		and not _carrying
-		and _action == &""
+		and (_action == &"" or _attacking)
 		and _freeze_timer <= 0.0
 		and _punch_elapsed >= CombatSpec.PUNCH_TIME
 		and (_ragdoll == null or not _ragdoll.active),
@@ -867,12 +875,54 @@ func play_action(logical: StringName) -> bool:
 	if _player == null or clip == &"":
 		return false
 	_action = clip
+	_attacking = String(logical).begins_with("attack")
 	_holding = false
 	_player.speed_scale = 1.0
 	_player.play(clip, ACTION_BLEND_TIME)
 	if _pose != null:
 		_pose.set_acting(true)
+	if _attacking:
+		var spec := _action_spec(logical)
+		if _gait_bob != null:
+			_gait_bob.strike(spec, _action_scale(logical))
+		# 兩腳釘住整招：髖往前壓時腳留在原地，腿才會彎成弓步。
+		if _foot_ik != null:
+			_foot_ik.pin(
+				float(spec.get("windup", 0.08))
+				+ float(spec.get("active", 0.08))
+				+ float(spec.get("recovery", 0.16))
+			)
 	return true
+
+
+## 這一招的相位時間，**跟 `MotionForge` 建片段時用的是同一筆**，所以髖的衝量與
+## 手臂的關鍵影格永遠對得上。
+func _action_spec(logical: StringName) -> Dictionary:
+	match logical:
+		&"attack_dash":
+			return CombatSpec.DASH_ATTACK
+		&"attack_air":
+			return CombatSpec.AIR_ATTACK
+		_:
+			return CombatSpec.step(_combo_index(logical))
+
+
+func _action_scale(logical: StringName) -> float:
+	match logical:
+		&"attack_dash":
+			return float(MotionClips.DASH_SHAPE["scale"])
+		&"attack_air":
+			return float(MotionClips.AIR_SHAPE["scale"])
+		_:
+			return float(MotionClips.COMBO_SHAPE[_combo_index(logical)]["scale"])
+
+
+## "attack1" → 0、"attack3" → 2。
+func _combo_index(logical: StringName) -> int:
+	var name := String(logical)
+	if name.length() < 7 or not name.begins_with("attack"):
+		return 0
+	return clampi(name.substr(6).to_int() - 1, 0, MotionClips.COMBO_SHAPE.size() - 1)
 
 
 func _on_animation_finished(finished: StringName) -> void:
@@ -884,5 +934,6 @@ func _on_animation_finished(finished: StringName) -> void:
 ## 動畫自然播完，或是被倒地之類的外力打斷，都要走這裡。
 func _end_action() -> void:
 	_action = &""
+	_attacking = false
 	if _pose != null:
 		_pose.set_acting(false)
