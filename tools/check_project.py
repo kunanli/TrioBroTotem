@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = ROOT / "trio-project"
+CHARACTERS = PROJECT / "assets" / "characters"
 
 problems = []
 notes = []
@@ -533,6 +534,38 @@ def check_model_sizes():
         notes.append(f"比對了 {checked} 個角色模型的尺寸")
 
 
+def check_skin_bleed():
+    """頭殼上有沒有手臂等外來骨骼的權重（tools/fix_skin_bleed.py）。
+
+    Meshy 自動蒙皮把手臂的權重滲進整顆頭，手一擺臉就歪——青蛙最嚴重，使用者
+    看到的是「臉過度扭曲」。修法是資產層的（改 GLB），所以新的匯出檔進來
+    一定會再中；在這裡量一次，漏了就叫人重跑那支工具。
+    """
+    if not CHARACTERS.exists():
+        return
+    try:
+        from fix_skin_bleed import audit
+    except ImportError:
+        notes.append("fix_skin_bleed.py 不在同一個資料夾，跳過蒙皮權重檢查")
+        return
+    checked = 0
+    for model in sorted(CHARACTERS.glob("*.glb")):
+        try:
+            leaked, _tear = audit(model)
+        except Exception as error:
+            problems.append(f"{model.relative_to(ROOT)} 讀不出蒙皮：{error}")
+            continue
+        if leaked:
+            problems.append(
+                f"{model.relative_to(ROOT)} 的頭殼上有 {leaked} 個頂點帶著手臂等外來骨骼的"
+                f"權重，手一擺臉就歪。"
+                f"跑 python tools/fix_skin_bleed.py --apply，再 godot --headless --import"
+            )
+        checked += 1
+    if checked:
+        notes.append(f"量了 {checked} 個角色模型的蒙皮權重")
+
+
 def check_wiring():
     """接線檢查（節點路徑、autoload 成員、RPC 標註、訊號、群組）。"""
     try:
@@ -553,6 +586,7 @@ def main():
     check_dimensions()
     check_floor_gaps()
     check_model_sizes()
+    check_skin_bleed()
     check_wiring()
     check_with_godot()
 
