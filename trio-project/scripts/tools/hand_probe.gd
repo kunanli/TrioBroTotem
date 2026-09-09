@@ -5,6 +5,8 @@ extends Node3D
 ##     godot --headless --fixed-fps 120 --path trio-project res://scenes/tools/hand_probe.tscn
 ##     godot --headless --fixed-fps 120 --path trio-project \
 ##           res://scenes/tools/hand_probe.tscn --ik=0        # 關掉手部 IK 當對照組
+##     ... --guard=0                                          # 關掉防撞當對照組
+##     ... --only=pig_warrior                                 # 只量一隻
 ##
 ## **一定要 `--fixed-fps 120`。** 探針自己用固定步長推位移與動畫，但修改器堆疊吃的
 ## `delta` 是真實幀的——headless 一幀可能只有一兩毫秒，所有淡入淡出（鎖腳、手部
@@ -71,6 +73,18 @@ const STRIKE_SETTLED := 3.0
 const QUICK_SAMPLE := 0.3
 const QUICK_WARMUP := 0.6
 
+## `[Clash]`：重疊超過這個就標「打架」（公尺）。防撞層留的餘裕是 1.5 公分，
+## 阻尼追上之前會有半公分左右的殘差，那不算。
+const CLASH_LIMIT := 0.005
+
+## `[Clash]` 要點名的一次性動作。每一支播完再看 0.2 秒（收招）。
+const ACTIONS: Array[StringName] = [
+	&"attack1", &"attack2", &"attack3", &"attack_dash", &"attack_air",
+	&"jump", &"land", &"hurt",
+]
+const ACTION_WARMUP := 0.6
+const ACTION_TAIL := 0.2
+
 ## 模擬步長。跟遊戲一樣 120 Hz（project.godot），而且是固定的。
 const STEP := 1.0 / 120.0
 
@@ -98,6 +112,7 @@ class Sampler:
 	var others: Array[int] = []
 	var hand_pose := Transform3D.IDENTITY
 	var seen: Array[Vector3] = []
+	var frames: Array[Transform3D] = []
 	var captured := false
 
 	func _process_modification() -> void:
@@ -106,24 +121,84 @@ class Sampler:
 			return
 		hand_pose = skeleton.get_bone_global_pose(hand)
 		seen.clear()
+		frames.clear()
 		for bone in others:
-			seen.append(skeleton.get_bone_global_pose(bone).origin)
+			var pose := skeleton.get_bone_global_pose(bone)
+			seen.append(pose.origin)
+			frames.append(pose)
 		captured = true
+
+
+## `[Clash]` 的累加器：一段裡兩手最深重疊多少、手穿軀幹／頭多深、肘穿軀幹多深。
+##
+## 半徑來自 `BodyShape`（網格量的）。重疊算到**表面**（軀幹半徑＋手半徑），
+## 不含防撞層自己留的餘裕，所以修完的目標是 0。`Sampler.others` 的順序見
+## `_report()`：[副手, 頭, 肩, 左手, 右手, 髖, 頸, 左前臂, 右前臂]。
+class Clash:
+	var hands := 0.0
+	var torso: Array[float] = [0.0, 0.0]
+	var head: Array[float] = [0.0, 0.0]
+	var elbow: Array[float] = [0.0, 0.0]
+	var frames := 0
+
+	func feed(sampler: Sampler, shape: Dictionary) -> void:
+		if sampler.seen.size() < 9:
+			return
+		frames += 1
+		var s := sampler.seen
+		var hand_r := float(shape["hand"])
+		var centre: Vector3 = sampler.frames[1] * (shape["head_centre"] as Vector3)
+		var hips: Transform3D = sampler.frames[5]
+		hands = maxf(hands, hand_r * 2.0 - s[3].distance_to(s[4]))
+		for side in 2:
+			var here: Vector3 = s[3 + side]
+			# 穿多深＝把它推出來要推多遠（跟防撞層同一個函式，只是不含餘裕）。
+			torso[side] = maxf(
+				torso[side], BodyShape.torso_push(shape, here, hips, s[6], hand_r).length()
+			)
+			head[side] = maxf(head[side], float(shape["head"]) + hand_r - here.distance_to(centre))
+			elbow[side] = maxf(
+				elbow[side], BodyShape.torso_push(shape, s[7 + side], hips, s[6], 0.0).length()
+			)
+
+	func line(label: String) -> String:
+		var worst := maxf(hands, maxf(maxf(torso[0], torso[1]), maxf(head[0], head[1])))
+		return (
+			"  [Clash] %-12s 兩手 %4.1f　手穿軀幹 L %4.1f R %4.1f　手穿頭 L %4.1f R %4.1f"
+			+ "　（肘穿軀幹 L %4.1f R %4.1f）cm%s"
+		) % [
+			label,
+			hands * 100.0,
+			torso[0] * 100.0, torso[1] * 100.0,
+			head[0] * 100.0, head[1] * 100.0,
+			elbow[0] * 100.0, elbow[1] * 100.0,
+			("" if worst <= CLASH_LIMIT else "　← 打架"),
+		]
+
 
 
 var _quick := false
 var _with_bob := true
+var _with_guard := true
 
 
 func _ready() -> void:
 	var with_ik := _argument("--ik=") != "0"
 	_with_bob = _argument("--bob=") != "0"
+	_with_guard = _argument("--guard=") != "0"
 	_quick = _has_flag("--quick")
 	print(
-		"\n手部 IK：%s%s"
-		% [("開" if with_ik else "**關**"), ("　（--quick：只量待機）" if _quick else "")]
+		"\n手部 IK：%s　防撞：%s%s"
+		% [
+			("開" if with_ik else "**關**"),
+			("開" if _with_guard else "**關**"),
+			("　（--quick：只量待機）" if _quick else ""),
+		]
 	)
+	var only := _argument("--only=")
 	for id in CharacterRoster.SLOT_ORDER:
+		if only != "" and String(id) != only:
+			continue  # 調一隻的時候不必等另外兩隻
 		var visual := CharacterVisual.new()
 		visual.name = String(id)
 		add_child(visual)
@@ -182,11 +257,21 @@ func _report(visual: CharacterVisual, with_ik: bool) -> void:
 	var bob := skeleton.get_node_or_null("GaitBob") as GaitBob
 	if bob != null:
 		bob.active = _with_bob
+	var guard := skeleton.get_node_or_null("ArmGuard") as ArmGuard
+	if guard != null:
+		guard.active = _with_guard
 	var sampler := Sampler.new()
 	sampler.name = "HandSampler"
 	sampler.hand = hand
-	sampler.others = [off_hand, head, shoulder]
+	# 順序是 `Clash.feed()` 讀的：[副手, 頭, 肩, 左手, 右手, 髖, 頸, 左前臂, 右前臂]
+	sampler.others = [
+		off_hand, head, shoulder,
+		skeleton.find_bone("LeftHand"), skeleton.find_bone("RightHand"),
+		skeleton.find_bone("Hips"), skeleton.find_bone("Neck"),
+		skeleton.find_bone("LeftLowerArm"), skeleton.find_bone("RightLowerArm"),
+	]
 	skeleton.add_child(sampler)  # 掛最後面，才看得到所有修改器的結果
+	var shape := visual.body_shape()
 
 	print(
 		"\n=== %s（%s 掛在 %s）　副手臂長 %.3f m　副手握點 %s ==="
@@ -198,6 +283,7 @@ func _report(visual: CharacterVisual, with_ik: bool) -> void:
 			("有" if has_off else "**這把是單手的**"),
 		]
 	)
+	print("  身形（網格量的）：%s" % BodyShape.describe(shape))
 	for entry in BANDS:
 		var band: Dictionary = entry
 		if _quick and String(band["label"]) != "idle":
@@ -209,7 +295,10 @@ func _report(visual: CharacterVisual, with_ik: bool) -> void:
 			"has_off": has_off,
 			"arm": arm,
 			"height": _skeleton_height(skeleton),
+			"shape": shape,
 		})
+	if not _quick:
+		await _measure_actions(visual, player, sampler, shape)
 	sampler.queue_free()
 	if not _quick:
 		await _measure_strike(visual, player, skeleton, hand)
@@ -238,11 +327,13 @@ func _measure(
 	var head_min := INF
 	var arrow := skeleton.find_child("arrow", true, false) as MeshInstance3D
 	var arrow_frames := 0
+	var clash := Clash.new()
 	var to_space := visual.global_transform.affine_inverse() * skeleton.global_transform
 	for _index in int((QUICK_SAMPLE if _quick else SAMPLE_SECONDS) / STEP):
 		await _advance(visual, player, speed)
 		if not sampler.captured:
 			continue
+		clash.feed(sampler, geometry["shape"])
 		if arrow != null and arrow.visible:
 			arrow_frames += 1
 		# 角色一直在往前走，所以每一幀的換算矩陣都要重取。
@@ -311,6 +402,27 @@ func _measure(
 			else ""
 		)
 	)
+	print(clash.line(String(band["label"])))
+
+
+## 一次性動作逐支點名：從待機起手，播完再看一小段收招，印 `[Clash]`。
+func _measure_actions(
+	visual: CharacterVisual, player: AnimationPlayer, sampler: Sampler, shape: Dictionary
+) -> void:
+	for action in ACTIONS:
+		visual.position = Vector3.ZERO
+		for _warm in int(ACTION_WARMUP / STEP):
+			await _advance(visual, player, 0.0)
+		if not visual.play_action(action):
+			print("  [Clash] %-12s （沒有這支）" % action)
+			continue
+		var total := player.get_animation(player.current_animation).length + ACTION_TAIL
+		var clash := Clash.new()
+		for _index in int(total / STEP):
+			await _advance(visual, player, 0.0)
+			if sampler.captured:
+				clash.feed(sampler, shape)
+		print(clash.line(String(action)))
 
 
 ## 出招：髖壓了多少、腳滑了多少、手臂多久回來。

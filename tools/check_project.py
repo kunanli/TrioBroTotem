@@ -413,8 +413,11 @@ def check_beats(godot):
     這些規則沒有一條看得出來壞了——秤錯重量的板子看起來完全正常，只是永遠
     踩不開；毒池的感應區高兩公分，站在池中央石頭上的人就會莫名其妙掉血。
     """
+    # `--fixed-fps 120`：修改器堆疊的淡入淡出吃真實幀的 delta，headless 一幀只有
+    # 一兩毫秒，60 幀還在淡——副手 IK 沒接上、防撞的推力還沒放掉，規則會誤報。
+    # hand_probe／gait_probe 的檔頭記過同一個坑。
     result = subprocess.run(
-        [godot, "--headless", "--path", str(PROJECT),
+        [godot, "--headless", "--fixed-fps", "120", "--path", str(PROJECT),
          "res://scenes/tools/beat_probe.tscn"],
         capture_output=True, text=True, timeout=300,
     )

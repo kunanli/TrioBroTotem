@@ -101,9 +101,13 @@ const PASSES := 2
 ## 八輪是給後面那些細修用的。
 const OFF_PASSES := 8
 
-## 副手放手的門檻，單位是臂長的比例。1.0（剛好搆到）之前吃滿，超過 1.15 完全
+## 副手放手的門檻，單位是臂長的比例。1.0（剛好搆到）之前吃滿，超過這個值完全
 ## 放開，中間線性淡出。**不留這一段的話，姿勢一沒帶到位就會看到一條直手臂。**
-const RELEASE := 1.15
+##
+## 原本 1.15。法杖為了不穿肚子往前伸之後（防撞那一輪），青蛙走路時左肩到握點
+## 1.03 倍臂長，淡出吃掉兩成、手離杖身最遠 15.6 公分；拉到 1.25 剩 9.1 公分，
+## 待機不受影響（0.64 倍臂長）。
+const RELEASE := 1.25
 
 ## 副手最後停在武器自己的座標上的哪一點。弓弦要靠它決定被拉開多少。
 ##
@@ -136,6 +140,18 @@ func configure(owner_space: Node3D) -> void:
 ## 現在該不該穩定持械手與接上副手。由 `CharacterVisual` 每幀餵。
 func set_steadying(steadying: bool) -> void:
 	_steadying = steadying
+
+
+## 現在在不在穩定（防撞層要知道副手是不是握在武器上）。
+func is_steadying() -> bool:
+	return _steadying
+
+
+## 副手握點離持械手骨多遠（公尺）；單手武器回傳 0。防撞層用它決定兩手該多近。
+func grip_distance() -> float:
+	if _off.is_empty():
+		return 0.0
+	return (_off["grip"] as Vector3).length()
 
 
 func _process_modification() -> void:

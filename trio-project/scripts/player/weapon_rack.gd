@@ -133,7 +133,11 @@ const SHAPES := {&"sword": SWORD, &"bow": BOW, &"staff": STAFF}
 ## 而且這樣「有副手」與「沒有副手」兩條路都會被真的走過。
 const OFF_GRIPS := {
 	&"staff": Vector3(0.0, 0.38, 0.0),
-	&"bow": Vector3(0.0, 0.0, -0.164),
+	# 弓：以前搭在弦的靜置位置（−0.164），拉弦的手離持弓的手骨只有 9 公分，兩隻
+	# 7.7 公分的大手掌疊成一團（走跑時最明顯，`hand_probe` 的 [Clash] 兩手 6.7）。
+	# 往後 7.6 公分：弦在待機時就微微搭著手，兩手剛好分開。箭的顯示門檻跟著
+	# 抬（`bow_string.gd` 的 ARROW_SHOW／RELEASE）。
+	&"bow": Vector3(0.0, 0.0, -0.24),
 }
 
 

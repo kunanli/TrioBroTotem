@@ -67,7 +67,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"sword", "bone": &"RightHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(94, 0.0, 50),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(94, 0.0, 49),
 			},
 		],
 		"pose": {
@@ -98,7 +98,7 @@ const CHARACTERS := {
 		"weapons": [
 			{
 				"kind": &"staff", "bone": &"RightHand",
-				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(46, 0.0, -23),
+				"at": Vector3(0.0, 0.06, 0.0), "spin": Vector3(50, 0.0, 12),
 			},
 		],
 		"pose": {

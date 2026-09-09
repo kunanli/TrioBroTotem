@@ -25,6 +25,14 @@ const OFF_HAND_FRAMES := 60
 
 ## 生成片段的過衝檢查：每支軌道取幾個樣、容許幾度。
 const OVERSHOOT_SAMPLES := 240
+
+## 身體形狀的合理範圍（公尺）：[鍵, 下限, 上限]。大頭身：頭比軀幹粗得多。
+const SHAPE_RANGES := [
+	["torso_low", 0.05, 0.70],
+	["torso_high", 0.05, 0.70],
+	["head", 0.10, 0.60],
+	["hand", 0.02, 0.12],
+]
 const OVERSHOOT_TOLERANCE := 3.0
 
 ## 驗 AI 時把不相干的角色搬到哪裡去。
@@ -123,6 +131,7 @@ func _check_animations() -> void:
 		)
 
 		await _check_off_hand(visual)
+		_check_shape(visual)
 		_check_overshoot(visual)
 		# queue_free 不是 free：這底下有 Ragdoll 建出來的 PhysicalBone3D，
 		# 當場拆掉物理節點會讓 Jolt 抱怨。反正它們不在任何群組裡，
@@ -241,6 +250,40 @@ func _check_off_hand(visual: CharacterVisual) -> void:
 		)
 		% [visual.character_id, kind, gap * 100.0, gap / arm, OFF_HAND_LIMIT]
 	)
+
+
+## 身體形狀量得到、而且在合理範圍：防撞層（`arm_guard.gd`）靠這幾個半徑判撞。
+##
+## 量不到時 `BodyShape` 退回身高比例的預設並警告，防撞會用錯的胖瘦在推手——
+## 太胖手永遠貼不到身體，太瘦手插在肚子裡也不推。這裡把「量到了」與「數字像
+## 一個大頭身角色」都驗一次；骨名對不上、蒙皮讀不出來都會在這裡叫。
+func _check_shape(visual: CharacterVisual) -> void:
+	var shape := visual.body_shape()
+	_expect(
+		not shape.is_empty() and bool(shape.get("ok", false)),
+		"%s 的身體形狀量不到（BodyShape.measure 退回預設）" % visual.character_id
+	)
+	if shape.is_empty():
+		return
+	for rule in SHAPE_RANGES:
+		var key: String = rule[0]
+		# 軀幹是 16 個方向的剖面，逐個檢查；頭與手是單一半徑。
+		var values: Array[float] = []
+		var entry = shape.get(key, 0.0)
+		if entry is PackedFloat32Array:
+			for value in entry:
+				values.append(float(value))
+		else:
+			values.append(float(entry))
+		for value in values:
+			_expect(
+				value >= float(rule[1]) and value <= float(rule[2]),
+				"%s 的 %s 半徑 %.1f 公分，不在 %.0f–%.0f 公分之間——網格或骨名怪怪的"
+				% [
+					visual.character_id, key, value * 100.0,
+					float(rule[1]) * 100.0, float(rule[2]) * 100.0,
+				]
+			)
 
 
 ## 道具那一半：放上去會開、門會沉、拿走了不會關（latch）。

@@ -36,8 +36,10 @@ const FOLLOW_TIME := 0.04
 ## 附近抖，用同一個門檻箭會一閃一閃。拉到 6 公分才算在拉弓，掉回 2 公分以下才算
 ## 放手——放手那一幀箭消失、放一道箭痕。**放手是從弦的狀態判的，不另外接時間軸**：
 ## 弦本來就是跟著右手走的。
-const ARROW_SHOW := 0.06
-const ARROW_RELEASE := 0.02
+## 副手的靜置握點現在比弦的靜置位置後 7.6 公分（`WeaponRack.OFF_GRIPS`），待機時
+## `_pull` 就是 0.076，門檻要比它高才不會待機就露箭；放手的門檻要比它高才放得掉。
+const ARROW_SHOW := 0.14
+const ARROW_RELEASE := 0.10
 
 var _upper: MeshInstance3D = null
 var _lower: MeshInstance3D = null
